@@ -53,7 +53,7 @@ test('submit is refused while closed, then saves and emails once opened', () => 
   s.setSetting('Open', true);
   const r = s.post({action: 'submit', code, consent: true, language: 'en', data: delivery});
   assert.equal(r.ok, true, JSON.stringify(r));
-  assert.equal(r.data.emailStatus, 'sent');
+  assert.equal(r.data.emailStatus, 'queued', 'emails go out in the background');
   assert.equal(r.data.gift_name, 'HARIO — Tea & coffee brewer mug');
   const row = s.couples.data[1];
   assert.equal(row[0], code);
@@ -112,7 +112,7 @@ test('email quota failure keeps the order and is retried later', () => {
   const s = setup({mailQuota: 0}); s.setSetting('Open', true);
   const r = s.post({action: 'submit', code: s.codeOf(3), consent: true, language: 'my', data: delivery});
   assert.equal(r.ok, true);
-  assert.equal(r.data.emailStatus, 'failed');
+  assert.equal(r.data.emailStatus, 'queued');
   assert.match(s.couples.data[1][16], /^Failed/);
   s.ctx.MailApp.getRemainingDailyQuota = () => 10;
   s.ctx.retryGiftEmails();
@@ -416,9 +416,9 @@ test('safeguard: Status dropdown, edit trigger installed once, notification remi
   assert.equal(s.couples.validation.col, 12);
   assert.equal(JSON.stringify(s.couples.validation.rule.list), JSON.stringify(['Awaiting choice','Requested','Ordered','Shipped','Delivered']));
   assert.equal(s.couples.validation.rule.allowInvalid, false);
-  assert.equal(s.triggers.length, 1);
+  assert.deepEqual(s.triggers.map(t => t.getHandlerFunction()).sort(), ['onGiftSheetEdit', 'onRsvpSheetEdit', 'processGiftEmailQueue']);
   s.ctx.setupGiftStandalone();
-  assert.equal(s.triggers.length, 1, 'no duplicate trigger');
+  assert.equal(s.triggers.length, 3, 'no duplicate triggers');
   assert.equal(s.couples.getConditionalFormatRules().length, 1, 'no duplicate highlight rule');
   const code = s.codeOf(2);
   s.post({action: 'submit', code, consent: true, data: D});
@@ -464,4 +464,79 @@ test('issueGiftCodesForAllGuests: codes for every named row, existing codes kept
   const snapshot = JSON.stringify(s.rsvp.data);
   s.ctx.issueGiftCodesForAllGuests();
   assert.equal(JSON.stringify(s.rsvp.data), snapshot);
+});
+
+const D2 = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Shibuya 1-2-3 Room 4', note: ''};
+
+test('speed: code checks are answered from the cache; organiser edits apply at once', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: D2});
+  assert.equal(s.post({action: 'lookup', code}).data.selection.status, 'Requested');
+  const rowNo = s.couples.data.findIndex(r => r[0] === code) + 1;
+  // organiser sets Ordered by hand: cached answer until the edit trigger runs…
+  s.couples.data[rowNo - 1][11] = 'Ordered';
+  s.couples.data[rowNo - 1][12] = 'TRACK-123';
+  assert.equal(s.post({action: 'lookup', code}).data.selection.status, 'Requested', 'served from cache');
+  s.ctx.onGiftSheetEdit({range: s.couples.getRange(rowNo, 12, 1, 2)});
+  const fresh = s.post({action: 'lookup', code}).data.selection;
+  assert.equal(fresh.status, 'Ordered');
+  assert.equal(fresh.tracking, 'TRACK-123');
+});
+
+test('speed: RSVP edits (names, Gift enabled) apply at once through the RSVP edit trigger', () => {
+  const s = setup();
+  const code = s.codeOf(2);
+  assert.equal(s.post({action: 'lookup', code}).data.label, 'Aye Aye & Ko Ko');
+  const h = s.rsvp.data[0];
+  s.rsvp.data[1][h.indexOf('Gift display name')] = 'Aye Aye & Ko Ko (Mandalay)';
+  assert.equal(s.post({action: 'lookup', code}).data.label, 'Aye Aye & Ko Ko', 'cached');
+  s.ctx.onRsvpSheetEdit();
+  assert.equal(s.post({action: 'lookup', code}).data.label, 'Aye Aye & Ko Ko (Mandalay)');
+  s.rsvp.data[1][h.indexOf('Gift enabled')] = 'No';
+  s.ctx.onRsvpSheetEdit();
+  assert.equal(s.post({action: 'lookup', code}).reason, 'not_found', 'disabled code stops working at once');
+});
+
+test('speed: the guest\'s own changes are visible immediately (submit, saved gifts)', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(3);
+  assert.equal(s.post({action: 'lookup', code}).data.selection, null);
+  s.post({action: 'save', code, saved: ['hario-mug']});
+  assert.deepEqual(s.post({action: 'lookup', code}).data.saved, ['hario-mug']);
+  s.post({action: 'submit', code, consent: true, data: D2});
+  assert.equal(s.post({action: 'lookup', code}).data.selection.order_id, 'HM-0001');
+  s.post({action: 'submit', code, consent: true, data: {...D2, gift_id: 'hario-bowls'}});
+  assert.equal(s.post({action: 'lookup', code}).data.selection.gift_id, 'hario-bowls');
+});
+
+test('speed: emails are queued and sent by the background job, once', () => {
+  const s = setup({noQueueRun: true}); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  const r = s.post({action: 'submit', code, consent: true, language: 'my', data: D2});
+  assert.equal(r.data.emailStatus, 'queued');
+  assert.equal(s.mail.length + s.notices.length, 0, 'nothing sent during the request');
+  const row = () => s.couples.data.find(x => x[0] === code);
+  assert.equal(row()[16], 'Queued');
+  assert.equal(Object.keys(s.props).filter(k => k.startsWith('MAILQ_')).length, 1);
+  s.post({action: 'submit', code, consent: true, data: {...D2, gift_id: 'hario-bowls'}});
+  s.ctx.processGiftEmailQueue();
+  assert.equal(s.mail.length, 1, 'one guest email with the latest details');
+  assert.match(s.mail[0].htmlBody, /Lidded glass bowls/);
+  assert.equal(s.notices.length, 2, 'NEW and CHANGED notifications, each with its own details');
+  assert.match(s.notices[0].subject, /\[Gift NEW\] HM-0001 .* Tea & coffee brewer mug/);
+  assert.match(s.notices[1].subject, /\[Gift CHANGED\] HM-0002 .* Lidded glass bowls/);
+  assert.match(row()[16], /^Sent/);
+  assert.equal(Object.keys(s.props).filter(k => k.startsWith('MAILQ_')).length, 0);
+  s.ctx.processGiftEmailQueue();
+  assert.equal(s.mail.length + s.notices.length, 3, 'running again sends nothing');
+});
+
+test('speed: without the background trigger (setup not re-run) emails are sent straight away', () => {
+  const s = setup({noQueueRun: true}); s.setSetting('Open', true);
+  delete s.props.MAIL_TRIGGER;
+  const r = s.post({action: 'submit', code: s.codeOf(2), consent: true, data: D2});
+  assert.equal(r.data.emailStatus, 'sent');
+  assert.equal(s.mail.length, 1);
+  assert.equal(s.notices.length, 1);
 });
