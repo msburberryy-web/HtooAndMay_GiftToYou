@@ -210,3 +210,4 @@ body{font-family:'Manrope','Zen Kaku Gothic New',Arial,sans-serif}
 @keyframes wobble{0%,100%{transform:rotate(0)}50%{transform:rotate(-2deg)}}
 .success-badge{display:flex;align-items:center;gap:8px;color:#5d6b3f;font-size:17px;font-weight:500}
 @media(prefers-reduced-motion:reduce){.heart,.heart[aria-pressed=true],.opening-dots span,.delivery-scene *{animation:none!important;transition:none!important}}
+.order-id{font-size:14px;color:#62594f;letter-spacing:.3px}.order-id strong{color:#7c3241;letter-spacing:1px}

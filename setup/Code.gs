@@ -23,7 +23,12 @@ const GIFT_EMAIL_HEADERS = ['Email status','Email fingerprint','Email language']
 const GIFT_STATUSES = ['Awaiting choice','Requested','Ordered','Shipped','Delivered'];
 // Couples columns U:Z — what each couple has done on the site (Japan time).
 const GIFT_ACTIVITY_HEADERS = ['First visited at','Last visited at','Visits','Cart gift','Cart updated at','Saved gifts'];
-const GIFT_ROW_WIDTH = 26; // A:Z
+const GIFT_ROW_WIDTH = 27; // A:AA
+// Couples column AA: the order ID of the couple's current order. Every confirmation is also kept, never overwritten,
+// as its own line in the Order history tab.
+const GIFT_ORDER_COLUMN = 27;
+const ORDERS_TAB = 'Order history';
+const ORDER_HEADERS = ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces'];
 const GIFT_MAX_SAVED = 5;
 // The guest list (RSVPs) is cached for an hour to make code checks fast. Unknown codes always re-read the sheet,
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
@@ -187,20 +192,38 @@ function submit_(p){
  if(!gift)throw fault_('That gift is no longer available. Please choose another.',409,'unavailable');
  const entry=rsvpRegistry_().get(code);
  if(!entry)throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');
- const sheet=couplesSheet_();ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);
+ const sheet=couplesSheet_();ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);
  const found=ensureCoupleRow_(sheet,entry),row=found.value;
  if(['Awaiting choice','Requested',''].indexOf(text_(row[11]))<0)throw fault_('Your gift is already being prepared. Contact Htoo & May to change it.',409,'locked');
  const now=new Date().toISOString();
  const firstSubmitted=row[3]?text_(row[19]||row[14]||row[13]):now;
  if(row[3]&&(!Number.isFinite(Date.parse(firstSubmitted))||Date.now()>=Date.parse(firstSubmitted)+GIFT_REVISION_HOURS*3600000))throw fault_('The 48-hour revision window has ended. Contact Htoo & May for help.',409,'locked');
- sheet.getRange(found.row,4,1,12).setNumberFormat('@').setValues([[cell_(gift.id),cell_(gift.brand+' — '+gift.name),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),'Requested',row[12],text_(row[13])||now,now]]);
- sheet.getRange(found.row,20).setNumberFormat('@').setValue(firstSubmitted);
- SpreadsheetApp.flush();
- const updated=sheet.getRange(found.row,1,1,16).getValues()[0];
  const language=p.language==='my'?'my':'en';
+ const previousOrder=text_(row[GIFT_ORDER_COLUMN-1]);
+ // Pressing confirm again with nothing changed keeps the same order: no new history line, email or notification.
+ const same=row[3]&&previousOrder&&[[3,gift.id],[5,d.recipient],[6,d.email],[7,d.phone],[8,d.postal],[9,d.address],[10,d.note]].every(([c,v])=>text_(row[c])===v);
+ if(same)return {saved:true,giftId:gift.id,gift_name:text_(row[4]),status:'Requested',order_id:previousOrder,emailStatus:sendGiftConfirmation_(sheet,found.row,row,language),first_submitted_at:firstSubmitted};
+ const giftName=gift.brand+' — '+gift.name;
+ const orderId=appendOrder_(row[3]?'CHANGED':'NEW',code,invite_(row).label||entry.label,gift.id,giftName,d,language,previousOrder);
+ sheet.getRange(found.row,4,1,12).setNumberFormat('@').setValues([[cell_(gift.id),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),'Requested',row[12],text_(row[13])||now,now]]);
+ sheet.getRange(found.row,20).setNumberFormat('@').setValue(firstSubmitted);
+ sheet.getRange(found.row,GIFT_ORDER_COLUMN).setNumberFormat('@').setValue(orderId);
+ SpreadsheetApp.flush();
+ const updated=sheet.getRange(found.row,1,1,GIFT_ROW_WIDTH).getValues()[0];
  const emailStatus=sendGiftConfirmation_(sheet,found.row,updated,language);
- notifyOrganiser_(updated,row[3]?{gift:text_(row[4]),address:text_(row[9])}:null,emailStatus);
- return {saved:true,giftId:gift.id,gift_name:text_(updated[4]),status:'Requested',emailStatus,first_submitted_at:firstSubmitted};
+ notifyOrganiser_(updated,row[3]?{gift:text_(row[4]),address:text_(row[9]),order:previousOrder}:null,emailStatus);
+ return {saved:true,giftId:gift.id,gift_name:text_(updated[4]),status:'Requested',order_id:orderId,emailStatus,first_submitted_at:firstSubmitted};
+}
+
+// Adds one line to Order history (never edited afterwards) and returns its new ID, e.g. HM-0007. Runs under the script lock.
+function appendOrder_(type,code,couple,giftId,giftName,d,language,replaces){
+ const sh=ensureOrdersTab_(giftBook_());
+ const last=sh.getLastRow();
+ const ids=last<2?[]:sh.getRange(2,1,last-1,1).getValues().map(r=>{const m=/^HM-(\d+)$/.exec(text_(r[0]));return m?Number(m[1]):0;});
+ const orderId='HM-'+String(Math.max(0,...ids)+1).padStart(4,'0');
+ if(last+1>sh.getMaxRows())sh.insertRowsAfter(sh.getMaxRows(),1);
+ sh.getRange(last+1,1,1,ORDER_HEADERS.length).setNumberFormat('@').setValues([[orderId,type,code,cell_(couple),cell_(giftId),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),language,japanNow_(),replaces||'']]);
+ return orderId;
 }
 
 function validateDelivery_(data){
@@ -331,9 +354,32 @@ function ensureEmailColumns_(sheet){
 function ensureActivityColumns_(sheet){
  if(sheet.getMaxColumns()<GIFT_ROW_WIDTH)sheet.insertColumnsAfter(sheet.getMaxColumns(),GIFT_ROW_WIDTH-sheet.getMaxColumns());
  const existing=sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).getValues()[0].map(text_);
- if(existing.join('|')===GIFT_ACTIVITY_HEADERS.join('|'))return;
- if(existing.some((v,i)=>v&&v!==GIFT_ACTIVITY_HEADERS[i]))throw new Error('Gift Manager columns U:Z must be available for visit, cart and saved-gift tracking.');
- sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).setValues([GIFT_ACTIVITY_HEADERS]);
+ if(existing.join('|')!==GIFT_ACTIVITY_HEADERS.join('|')){
+  if(existing.some((v,i)=>v&&v!==GIFT_ACTIVITY_HEADERS[i]))throw new Error('Gift Manager columns U:Z must be available for visit, cart and saved-gift tracking.');
+  sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).setValues([GIFT_ACTIVITY_HEADERS]);
+ }
+ const orderHeader=text_(sheet.getRange(1,GIFT_ORDER_COLUMN).getValues()[0][0]);
+ if(orderHeader&&orderHeader!=='Current order ID')throw new Error('Gift Manager column AA must be available for Current order ID.');
+ if(!orderHeader)sheet.getRange(1,GIFT_ORDER_COLUMN).setValue('Current order ID');
+}
+function ensureOrdersTab_(book){
+ let sh=book.getSheetByName(ORDERS_TAB);
+ if(!sh){sh=book.insertSheet(ORDERS_TAB);sh.getRange(1,1,1,ORDER_HEADERS.length).setValues([ORDER_HEADERS]);sh.setFrozenRows(1);return sh;}
+ const headers=sh.getRange(1,1,1,ORDER_HEADERS.length).getValues()[0].map(text_);
+ if(headers.join('|')!==ORDER_HEADERS.join('|'))throw new Error('The Order history tab needs its original column headers: '+ORDER_HEADERS.join(', '));
+ return sh;
+}
+// One-time: orders confirmed before Order history existed get an ID and a history line (Type NEW, Replaces "imported").
+function backfillOrders_(sheet){
+ const last=sheet.getLastRow();if(last<2)return 0;
+ const rows=sheet.getRange(2,1,last-1,GIFT_ROW_WIDTH).getValues();let added=0;
+ rows.forEach((r,i)=>{
+  if(!text_(r[3])||text_(r[GIFT_ORDER_COLUMN-1]))return;
+  const d={recipient:text_(r[5]),email:text_(r[6]),phone:text_(r[7]),postal:text_(r[8]),address:text_(r[9]),note:text_(r[10])};
+  const id=appendOrder_('NEW',text_(r[0]),invite_(r).label,text_(r[3]),text_(r[4]),d,text_(r[18])||'en','imported');
+  sheet.getRange(i+2,GIFT_ORDER_COLUMN).setNumberFormat('@').setValue(id);added++;
+ });
+ return added;
 }
 function ensureRevisionColumn_(sheet){
  if(sheet.getMaxColumns()<20)sheet.insertColumnsAfter(sheet.getMaxColumns(),20-sheet.getMaxColumns());
@@ -378,7 +424,8 @@ function setupGiftStandalone(){
  const sheet=book.getSheetByName(COUPLES_TAB);
  if(!sheet||sheet.getRange(1,1,1,16).getValues()[0].map(text_).join('|')!==GIFT_HEADERS.join('|'))throw new Error('Gift Manager Couples headers do not match. Restore the original headers first.');
  ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);sheet.setFrozenRows(1);sheet.setFrozenColumns(3);
- ensureCatalogueTab_(book);ensureSettingsTab_(book);refreshCatalogueNow();
+ ensureCatalogueTab_(book);ensureSettingsTab_(book);ensureOrdersTab_(book);refreshCatalogueNow();
+ const imported=backfillOrders_(sheet);if(imported)console.log(imported+' earlier order(s) added to Order history.');
  MailApp.getRemainingDailyQuota(); // Requests send-mail permission; does not send anything.
  const props=PropertiesService.getScriptProperties();
  if(!props.getProperty('GIFT_TOKEN'))props.setProperty('GIFT_TOKEN',(Utilities.getUuid()+Utilities.getUuid()).replace(/-/g,''));
@@ -417,7 +464,7 @@ function retryGiftEmails(){
  const lock=LockService.getScriptLock();lock.waitLock(20000);
  try{
   const sheet=couplesSheet_();ensureEmailColumns_(sheet);
-  const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),19).getValues();
+  const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),Math.min(GIFT_ROW_WIDTH,sheet.getMaxColumns())).getValues();
   rows.forEach((r,i)=>{if(r[3]&&r[6]&&/^Failed/.test(text_(r[16])))sendGiftConfirmation_(sheet,i+2,r,text_(r[18])==='my'?'my':'en');});
  }finally{lock.releaseLock();}
 }
@@ -439,12 +486,19 @@ function checkGiftSetup(){
   const sheet=couplesSheet_();
   const activity=sheet.getMaxColumns()>=GIFT_ROW_WIDTH?sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).getValues()[0].map(text_).join('|'):'';
   if(activity!==GIFT_ACTIVITY_HEADERS.join('|'))throw new Error('Columns U:Z ('+GIFT_ACTIVITY_HEADERS.join(', ')+') are not set up. Run setupGiftStandalone.');
+  if(text_(sheet.getRange(1,GIFT_ORDER_COLUMN).getValues()[0][0])!=='Current order ID')throw new Error('Column AA (Current order ID) is not set up. Run setupGiftStandalone.');
   return Math.max(0,sheet.getLastRow()-1)+' row(s)';
  });
  step('Gift settings tab',()=>{
   if(!giftBook_().getSheetByName(SETTINGS_TAB))throw new Error('Tab "'+SETTINGS_TAB+'" not found. Run setupGiftStandalone.');
   const s=readSettings_();
   return 'Open='+s.open+', Deadline='+(s.deadline||'(empty → "to be announced")')+(deadlinePassed_(s.deadline)?' (PASSED — guests cannot confirm)':'');
+ });
+ step('Order history tab',()=>{
+  const sh=giftBook_().getSheetByName(ORDERS_TAB);if(!sh)throw new Error('Tab "'+ORDERS_TAB+'" not found. Run setupGiftStandalone.');
+  const headers=sh.getRange(1,1,1,ORDER_HEADERS.length).getValues()[0].map(text_);
+  if(headers.join('|')!==ORDER_HEADERS.join('|'))throw new Error('Headers changed. Expected: '+ORDER_HEADERS.join(', '));
+  return Math.max(0,sh.getLastRow()-1)+' order line(s)';
  });
  step('Catalogue tab',()=>{
   const gifts=readCatalogue_(),enabled=gifts.filter(g=>g.enabled);
@@ -469,13 +523,13 @@ function guestEmail_(r,language){
  const t=my?{
   title:'လက်ဆောင်ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ',hello:'ချစ်လှစွာသော '+invite_(r).label+'၊',
   intro:'ကျွန်တော်တို့ရဲ့ မင်္ဂလာနေ့ကို လာရောက်ချီးမြှင့်ပေးလို့ ကျေးဇူးအများကြီးတင်ပါတယ်။ သင်ရွေးထားတဲ့ လက်ဆောင်ကို လက်ခံရရှိပါပြီ။ ပွဲပြီးတဲ့နောက် ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။',
-  gift:'ရွေးထားသောလက်ဆောင်',deliver:'ပို့ဆောင်ရမည့်နေရာ',recipient:'လက်ခံမည့်သူ',phone:'ဖုန်းနံပါတ်',address:'လိပ်စာ',note:'မှတ်ချက်',when:'အတည်ပြုချိန်',code:'လက်ဆောင်ကုဒ်',
+  order:'မှာယူမှုနံပါတ်',gift:'ရွေးထားသောလက်ဆောင်',deliver:'ပို့ဆောင်ရမည့်နေရာ',recipient:'လက်ခံမည့်သူ',phone:'ဖုန်းနံပါတ်',address:'လိပ်စာ',note:'မှတ်ချက်',when:'အတည်ပြုချိန်',code:'လက်ဆောင်ကုဒ်',
   button:'ကျွန်ုပ်၏လက်ဆောင်ကို ကြည့်ရန်',change:'ပထမဆုံး အတည်ပြုပြီး ၄၈ နာရီအတွင်း၊ ဆိုင်မှာ မမှာယူရသေးလျှင် လက်ဆောင်ကို ပြောင်းလဲနိုင်ပါတယ်။',
   footer:'ဤအီးမေးလ်ကို အလိုအလျောက် ပို့ပေးထားပါသည်။ ပြန်မဖြေပါနှင့်။ မေးမြန်းလိုပါက Htoo သို့မဟုတ် May ကို တိုက်ရိုက် ဆက်သွယ်ပေးပါ။',love:'ချစ်ခြင်းမေတ္တာဖြင့်၊ Htoo & May'
  }:{
   title:'Your gift request is confirmed',hello:'Dear '+invite_(r).label+',',
   intro:'Thank you for celebrating with us. We have received your gift choice, and we will arrange delivery after the celebration. No payment is required.',
-  gift:'Your gift',deliver:'Delivering to',recipient:'Recipient',phone:'Phone',address:'Address',note:'Note',when:'Confirmed',code:'Gift code',
+  order:'Order ID',gift:'Your gift',deliver:'Delivering to',recipient:'Recipient',phone:'Phone',address:'Address',note:'Note',when:'Confirmed',code:'Gift code',
   button:'View my gift',change:'You can change your choice within 48 hours of your first confirmation, until it is ordered.',
   footer:'This is an automated confirmation. Please do not reply to this email. For help, contact Htoo or May directly.',love:'With love, Htoo & May'
  };
@@ -491,12 +545,13 @@ function guestEmail_(r,language){
   +'<tr><td style="padding:0 32px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffdf8;border:1px solid #e2d2c4"><tr><td style="padding:18px 20px;font-family:'+body+'">'
   +'<div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:'+MAIL.gold+'">'+e(t.gift)+'</div><div style="margin-top:6px;font-family:Georgia,serif;font-size:21px;color:'+MAIL.burgundy+'">'+e(text_(r[4]))+'</div><div style="margin-top:2px;font-size:13px;color:'+MAIL.muted+'">× 1</div></td></tr></table></td></tr>'
   +'<tr><td style="padding:22px 32px 0;font-family:'+body+'"><div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:'+MAIL.gold+';margin-bottom:6px">'+e(t.deliver)+'</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">'+detail
+  +(text_(r[GIFT_ORDER_COLUMN-1])?'<tr><td style="padding:6px 0;color:'+MAIL.muted+';font-size:13px">'+e(t.order)+'</td><td style="padding:6px 0;color:'+MAIL.burgundy+';font-size:15px;font-weight:bold;letter-spacing:1px">'+e(text_(r[GIFT_ORDER_COLUMN-1]))+'</td></tr>':'')
   +'<tr><td style="padding:6px 0;color:'+MAIL.muted+';font-size:13px">'+e(t.when)+'</td><td style="padding:6px 0;color:'+MAIL.ink+';font-size:15px">'+e(japanTime_(text_(r[14])))+'</td></tr><tr><td style="padding:6px 0;color:'+MAIL.muted+';font-size:13px">'+e(t.code)+'</td><td style="padding:6px 0;color:'+MAIL.ink+';font-size:15px;letter-spacing:1px">'+e(maskCode_(code))+'</td></tr></table></td></tr>'
   +'<tr><td style="padding:28px 32px 8px;text-align:center"><a href="'+e(link)+'" style="display:inline-block;background:'+MAIL.burgundy+';color:'+MAIL.cream+';text-decoration:none;font-family:'+body+';font-size:16px;padding:14px 34px;border-radius:4px">'+e(t.button)+'</a>'
   +'<p style="margin:14px 0 0;font-family:'+body+';font-size:13px;line-height:1.6;color:'+MAIL.muted+'">'+e(t.change)+'</p></td></tr>'
   +'<tr><td style="padding:26px 32px 32px;text-align:center;font-family:'+body+'"><div style="width:60px;height:1px;background:'+MAIL.gold+';margin:0 auto 18px"></div><div style="font-family:'+font+';font-size:18px;color:'+MAIL.burgundy+'">'+e(t.love)+'</div><p style="margin:14px 0 0;font-size:12px;line-height:1.6;color:'+MAIL.muted+'">'+e(t.footer)+'</p></td></tr></table></div>';
  const text=[t.title,'',t.hello,t.intro,'',t.gift+': '+text_(r[4])+' × 1',t.recipient+': '+text_(r[5]),t.phone+': '+text_(r[7]),t.address+': 〒'+text_(r[8])+' '+text_(r[9])]
-  .concat(text_(r[10])?[t.note+': '+text_(r[10])]:[]).concat([t.when+': '+japanTime_(text_(r[14])),t.code+': '+maskCode_(code),'',t.button+': '+link,t.change,'',t.love,t.footer]).join('\n');
+  .concat(text_(r[10])?[t.note+': '+text_(r[10])]:[]).concat(text_(r[GIFT_ORDER_COLUMN-1])?[t.order+': '+text_(r[GIFT_ORDER_COLUMN-1])]:[]).concat([t.when+': '+japanTime_(text_(r[14])),t.code+': '+maskCode_(code),'',t.button+': '+link,t.change,'',t.love,t.footer]).join('\n');
  return {subject:'Htoo & May — '+t.title,html,text};
 }
 function sendGiftConfirmation_(sheet,row,r,language){
@@ -532,7 +587,8 @@ function organiserEmails_(){
 function notifyOrganiser_(r,previous,guestEmailStatus){
  try{
   const kind=previous?'CHANGED':'NEW',label=invite_(r).label;
-  const lines=[['Couple',label],['Gift',text_(r[4])]].concat(previous&&previous.gift!==text_(r[4])?[['Previous gift',previous.gift]]:[])
+  const orderId=text_(r[GIFT_ORDER_COLUMN-1]);
+  const lines=[['Order ID',orderId+(previous&&previous.order?' (replaces '+previous.order+')':'')],['Couple',label],['Gift',text_(r[4])]].concat(previous&&previous.gift!==text_(r[4])?[['Previous gift',previous.gift]]:[])
    .concat([['Recipient',text_(r[5])],['Email',text_(r[6])],['Phone',text_(r[7])],['Postcode',text_(r[8])],['Address',text_(r[9])]])
    .concat(previous&&previous.address!==text_(r[9])?[['Previous address',previous.address]]:[])
    .concat([['Note',text_(r[10])||'—'],['Confirmed at',japanTime_(text_(r[14]))],['Guest email',guestEmailStatus],['Code',text_(r[0])]]);
@@ -541,7 +597,7 @@ function notifyOrganiser_(r,previous,guestEmailStatus){
   const html='<div style="font-family:Arial,sans-serif;color:'+MAIL.ink+';max-width:600px"><p style="margin:0 0 4px;font-size:12px;letter-spacing:2px;color:'+MAIL.gold+'">GIFT REQUEST · '+kind+'</p><h2 style="margin:0 0 14px;font-family:Georgia,serif;font-weight:normal;color:'+MAIL.burgundy+'">'+e(label)+'</h2><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%">'
    +lines.map(([k,v])=>'<tr><td style="padding:6px 12px 6px 0;color:'+MAIL.muted+';font-size:13px;vertical-align:top;width:30%;border-bottom:1px solid #eee">'+e(k)+'</td><td style="padding:6px 0;font-size:14px;white-space:pre-wrap;border-bottom:1px solid #eee">'+e(v)+'</td></tr>').join('')
    +'</table><p style="margin:18px 0 0"><a href="'+sheetUrl+'" style="color:'+MAIL.burgundy+'">Open the Gift Manager sheet</a></p></div>';
-  MailApp.sendEmail({to:organiserEmails_().join(','),subject:'[Gift '+kind+'] '+label+' — '+text_(r[4]),body:lines.map(([k,v])=>k+': '+v).join('\n')+'\n\n'+sheetUrl,htmlBody:html,name:'Htoo & May gift page'});
+  MailApp.sendEmail({to:organiserEmails_().join(','),subject:'[Gift '+kind+'] '+orderId+' · '+label+' — '+text_(r[4]),body:lines.map(([k,v])=>k+': '+v).join('\n')+'\n\n'+sheetUrl,htmlBody:html,name:'Htoo & May gift page'});
  }catch(error){console.warn('Organiser notification not sent: '+(error.message||error));}
 }
 
@@ -559,7 +615,7 @@ function cell_(s){const value=String(s==null?'':s);return /^[=+\-@]/.test(value)
 function japanNow_(){return Utilities.formatDate(new Date(),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm');}
 function japanTime_(iso){const t=Date.parse(iso);return Number.isFinite(t)?Utilities.formatDate(new Date(t),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm')+' JST':iso;}
 function invite_(r){const members=[text_(r[1]),text_(r[2])].filter(Boolean);return {code:text_(r[0]),label:members.join(' & '),members,created_at:text_(r[13])};}
-function selection_(r){return {gift_id:text_(r[3]),gift_name:text_(r[4]),recipient:text_(r[5]),email:text_(r[6]),phone:text_(r[7]),postal:text_(r[8]),address:text_(r[9]),note:text_(r[10]),status:text_(r[11]),tracking:text_(r[12]),created_at:text_(r[13]),updated_at:text_(r[14]),first_submitted_at:text_(r[19]||r[14]||r[13])};}
+function selection_(r){return {order_id:text_(r[GIFT_ORDER_COLUMN-1]),gift_id:text_(r[3]),gift_name:text_(r[4]),recipient:text_(r[5]),email:text_(r[6]),phone:text_(r[7]),postal:text_(r[8]),address:text_(r[9]),note:text_(r[10]),status:text_(r[11]),tracking:text_(r[12]),created_at:text_(r[13]),updated_at:text_(r[14]),first_submitted_at:text_(r[19]||r[14]||r[13])};}
 // What a code holder sees on "My selection": enough to recognise their order, not enough to misuse it.
 function maskSelection_(sel){return Object.assign({},sel,{email:maskEmail_(sel.email),phone:maskTail_(sel.phone,4),postal:sel.postal?sel.postal.slice(0,3)+'-••••':'',address:maskAddress_(sel.address),note:sel.note?'••••':'',masked:true});}
 function maskEmail_(v){const at=v.indexOf('@');return at>0?v[0]+'•••'+v.slice(at):'';}
