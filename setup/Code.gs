@@ -499,6 +499,34 @@ function setupGiftStandalone(){
  if(!props.getProperty('GIFT_TOKEN'))props.setProperty('GIFT_TOKEN',(Utilities.getUuid()+Utilities.getUuid()).replace(/-/g,''));
  console.log('Setup complete. Catalogue and Gift settings tabs are ready. Gift settings › Open stays FALSE until you change it.');
 }
+// Gives every RSVP row that has a name a long random gift code and QR link. Rows that already have a code keep it,
+// so this is safe to run again after new RSVPs arrive. Codes only work for rows marked Attending = yes.
+function issueGiftCodesForAllGuests(){
+ const lock=LockService.getScriptLock();lock.waitLock(20000);
+ try{
+  const {sh,headers}=ensureRsvpColumns_();
+  const last=sh.getLastRow();if(last<2){console.log('No RSVP rows yet.');return;}
+  const ci=codeColumn_(headers),qi=headers.indexOf('Gift QR link'),ni=headers.indexOf('Name'),di=headers.indexOf('Gift display name');
+  const rows=sh.getRange(2,1,last-1,headers.length).getValues();
+  const existing=new Set(rows.map(r=>text_(r[ci]).replace(/[\s-]/g,'').toUpperCase()).filter(Boolean));
+  let issued=0;const short=[];
+  rows.forEach((r,i)=>{
+   const row=i+2,named=(ni>=0&&text_(r[ni]))||(di>=0&&text_(r[di]));
+   let code=text_(r[ci]).replace(/[\s-]/g,'').toUpperCase();
+   if(!code){
+    if(!named)return;
+    do{code=Utilities.getUuid().replace(/-/g,'').slice(0,20).toUpperCase();}while(existing.has(code));
+    existing.add(code);issued++;
+    sh.getRange(row,ci+1).setValue(code);
+   }else if(code.length<12)short.push(row);
+   const link=GIFT_ORIGIN+'/#code='+code;
+   if(qi>=0&&text_(r[qi])!==link)sh.getRange(row,qi+1).setValue(link);
+  });
+  SpreadsheetApp.flush();refreshCatalogueNow();
+  console.log('Issued '+issued+' new gift code(s). Rows that already had a code kept it.');
+  if(short.length)console.log('⚠️ RSVP row(s) '+short.join(', ')+' have a short code that could be guessed. Clear that code cell and run this again to replace it.');
+ }finally{lock.releaseLock();}
+}
 function issueGiftCodesForConfiguredRows(){
  if(!Array.isArray(GIFT_ROWS_TO_ISSUE)||!GIFT_ROWS_TO_ISSUE.length)throw new Error('Set GIFT_ROWS_TO_ISSUE to the reviewed RSVP row numbers first.');
  const lock=LockService.getScriptLock();lock.waitLock(20000);
@@ -547,7 +575,7 @@ function checkGiftSetup(){
   const missing=['Name','Attending'].filter(h=>headers.indexOf(h)<0).concat(codeColumn_(headers)<0?['Gift code']:[]);
   if(missing.length)throw new Error('Missing columns: '+missing.join(', '));
   const registry=rsvpRegistry_(),short=Array.from(registry.keys()).filter(c=>c.length<12);
-  if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than 12 characters and could be guessed. Issue new codes for those rows with issueGiftCodesForConfiguredRows (clear the old code first).');
+  if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than 12 characters and could be guessed. Clear those code cells in RSVPs and run issueGiftCodesForAllGuests to replace them.');
   return registry.size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
  });
  step('Couples tab (Gift Manager)',()=>{
