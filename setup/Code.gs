@@ -17,6 +17,10 @@ const GIFT_NO_REPLY = false;
 const GIFT_REVISION_HOURS = 48;
 const GIFT_TIME_ZONE = 'Asia/Tokyo';
 const GIFT_CACHE_SECONDS = 60;
+// With the edit triggers installed (setupGiftStandalone), cached answers are kept up to 6 hours: every manual edit
+// to the Gift Manager or RSVP spreadsheet clears them at once, so guests never see outdated information.
+const GIFT_LONG_CACHE_SECONDS = 21600;
+const MAIL_QUEUE_PREFIX = 'MAILQ_';
 const GIFT_ORIGIN = 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou';
 const GIFT_HEADERS = ['Shared code','Partner one','Partner two','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Status','Tracking','Created at','Updated at','QR link'];
 const GIFT_EMAIL_HEADERS = ['Email status','Email fingerprint','Email language'];
@@ -75,7 +79,7 @@ const GIFT_ROWS_TO_ISSUE = [];
 function doGet(){return output_({ok:true,data:{service:'htoo-may-gift',version:2}});}
 
 function doPost(e){
- let lock,action='';
+ let lock,action='';cacheState__=null;
  try{
   let p;
   try{p=JSON.parse((e&&e.postData&&e.postData.contents)||'{}');}catch(_){throw fault_('Invalid request.',400,'invalid');}
@@ -102,14 +106,33 @@ function requireToken_(p){
  if(!token||typeof p.token!=='string'||p.token!==token)throw fault_('Access denied.',403,'forbidden');
 }
 
+/* ───────────── Fast answers (cache) ───────────── */
+
+let cacheState__=null;
+function cacheState_(){
+ if(cacheState__)return cacheState__;
+ const p=PropertiesService.getScriptProperties();
+ cacheState__={gen:p.getProperty('CACHE_GEN')||'0',seconds:p.getProperty('EDIT_TRIGGERS')==='2'?GIFT_LONG_CACHE_SECONDS:GIFT_CACHE_SECONDS,mailTrigger:p.getProperty('MAIL_TRIGGER')==='1'};
+ return cacheState__;
+}
+function cacheKey_(name){return name+'-g'+cacheState_().gen;}
+function lookupKey_(code){return cacheKey_('lookup-v1-'+code);}
+function forgetLookup_(code){try{CacheService.getScriptCache().remove(lookupKey_(code));}catch(ignore){}}
+// Any manual sheet edit: start a new cache generation (all cached answers are ignored from now on).
+function bumpCacheGen_(){
+ const p=PropertiesService.getScriptProperties();
+ p.setProperty('CACHE_GEN',String((Number(p.getProperty('CACHE_GEN'))||0)+1));
+ cacheState__=null;
+}
+
 /* ───────────── Catalogue & settings ───────────── */
 
 function publicCatalogue_(){
- const cache=CacheService.getScriptCache(),cached=cache.get('catalogue-v2');
+ const cache=CacheService.getScriptCache(),key=cacheKey_('catalogue-v3'),cached=cache.get(key);
  if(cached)return JSON.parse(cached);
  const settings=readSettings_();
  const value={open:settings.open,deadline:settings.deadline,message:settings.message,gifts:readCatalogue_()};
- cache.put('catalogue-v2',JSON.stringify(value),GIFT_CACHE_SECONDS);
+ cache.put(key,JSON.stringify(value),cacheState_().seconds);
  return value;
 }
 function readCatalogue_(){
@@ -136,23 +159,27 @@ function readSettings_(){
  return {open:bool_(map.open),deadline,message:text_(map.message)};
 }
 function deadlinePassed_(deadline){return !!deadline&&Date.now()>Date.parse(deadline+'T23:59:59+09:00');}
-// Run after editing the Catalogue, Gift settings or RSVPs to apply changes immediately
-// (otherwise within a minute for the catalogue, an hour for RSVP edits).
-function refreshCatalogueNow(){CacheService.getScriptCache().removeAll(['catalogue-v2','registry-v1']);}
+// Clears every cached answer. Manual sheet edits already do this automatically (edit triggers);
+// run it after changes made another way (e.g. a script or a form adding rows).
+function refreshCatalogueNow(){bumpCacheGen_();}
 
 /* ───────────── Guest actions ───────────── */
 
 function lookup_(code){
+ const cache=CacheService.getScriptCache(),key=lookupKey_(code),hit=cache.get(key);
+ if(hit)return JSON.parse(hit);
  const entry=registryEntry_(code);
  const found=findCoupleRow_(couplesSheet_(),code);
- return {label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[]};
+ const value={label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[]};
+ cache.put(key,JSON.stringify(value),cacheState_().seconds);
+ return value;
 }
 
 // Records a visit or a cart change. The website calls this in the background; guests never wait for it.
 function track_(p){
  const code=normalizeCode_(p.code),event=String(p.event||'');
  if(event!=='visit'&&event!=='cart')throw fault_('Unknown event.',400,'invalid');
- const sheet=couplesSheet_();ensureActivityColumns_(sheet);
+ const sheet=couplesSheet_(true);
  const found=activityRow_(sheet,code),row=found.value,now=japanNow_();
  if(event==='visit'){
   sheet.getRange(found.row,21,1,3).setNumberFormat('@').setValues([[text_(row[20])||now,now,String((Number(row[22])||0)+1)]]);
@@ -173,9 +200,10 @@ function save_(p){
  if(ids.length>GIFT_MAX_SAVED)throw fault_('You can save up to '+GIFT_MAX_SAVED+' gifts.',400,'limit');
  const known=new Set(publicCatalogue_().gifts.map(g=>g.id));
  if(ids.some(id=>!known.has(id)))throw fault_('That gift is no longer available.',409,'unavailable');
- const sheet=couplesSheet_();ensureActivityColumns_(sheet);
+ const sheet=couplesSheet_(true);
  const found=activityRow_(sheet,code);
  sheet.getRange(found.row,26).setNumberFormat('@').setValue(ids.join(', '));
+ forgetLookup_(code);
  return {saved:ids};
 }
 function activityRow_(sheet,code){
@@ -191,16 +219,16 @@ function savedIds_(v){return text_(v).split(',').map(x=>x.trim()).filter(Boolean
 
 function submit_(p){
  const code=normalizeCode_(p.code);
- const settings=readSettings_();
- if(!settings.open)throw fault_('Gift selections are not open yet.',409,'closed');
- if(deadlinePassed_(settings.deadline))throw fault_('The selection period has ended.',409,'ended');
+ // Catalogue, settings and guest list come from the cache, which every manual sheet edit clears.
+ const catalogue=publicCatalogue_();
+ if(!catalogue.open)throw fault_('Gift selections are not open yet.',409,'closed');
+ if(deadlinePassed_(catalogue.deadline))throw fault_('The selection period has ended.',409,'ended');
  if(p.consent!==true)throw fault_('Please agree to the use of your delivery details.',400,'invalid');
  const d=validateDelivery_(p.data);
- const gift=readCatalogue_().find(g=>g.id===d.gift_id&&g.enabled);
+ const gift=catalogue.gifts.find(g=>g.id===d.gift_id&&g.enabled);
  if(!gift)throw fault_('That gift is no longer available. Please choose another.',409,'unavailable');
- const entry=rsvpRegistry_().get(code);
- if(!entry)throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');
- const sheet=couplesSheet_();ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);
+ const entry=registryEntry_(code);
+ const sheet=couplesSheet_(true);
  const found=ensureCoupleRow_(sheet,entry),row=found.value;
  if(['Awaiting choice','Requested',''].indexOf(text_(row[11]))<0)throw fault_('Your gift is already being prepared. Contact Htoo & May to change it.',409,'locked');
  const now=new Date().toISOString();
@@ -210,16 +238,22 @@ function submit_(p){
  const previousOrder=text_(row[GIFT_ORDER_COLUMN-1]);
  // Pressing confirm again with nothing changed keeps the same order: no new history line, email or notification.
  const same=row[3]&&previousOrder&&[[3,gift.id],[5,d.recipient],[6,d.email],[7,d.phone],[8,d.postal],[9,d.address],[10,d.note]].every(([c,v])=>text_(row[c])===v);
- if(same)return {saved:true,giftId:gift.id,gift_name:text_(row[4]),status:'Requested',order_id:previousOrder,emailStatus:sendGiftConfirmation_(sheet,found.row,row,language),first_submitted_at:firstSubmitted};
+ if(same){
+  const sent=/^Sent/.test(text_(row[16]));
+  return {saved:true,giftId:gift.id,gift_name:text_(row[4]),status:'Requested',order_id:previousOrder,emailStatus:sent?'sent':sendOrQueueEmails_(sheet,found.row,row,language,null,false),first_submitted_at:firstSubmitted};
+ }
  const giftName=gift.brand+' — '+gift.name;
  const orderId=appendOrder_(row[3]?'CHANGED':'NEW',code,invite_(row).label||entry.label,gift.id,giftName,d,language,previousOrder);
  sheet.getRange(found.row,4,1,12).setNumberFormat('@').setValues([[cell_(gift.id),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),'Requested',row[12],text_(row[13])||now,now]]);
  sheet.getRange(found.row,20).setNumberFormat('@').setValue(firstSubmitted);
  sheet.getRange(found.row,GIFT_ORDER_COLUMN,1,2).setNumberFormat('@').setValues([[orderId,changesCloseAt_(firstSubmitted)]]);
  SpreadsheetApp.flush();
- const updated=sheet.getRange(found.row,1,1,GIFT_ROW_WIDTH).getValues()[0];
- const emailStatus=sendGiftConfirmation_(sheet,found.row,updated,language);
- notifyOrganiser_(updated,row[3]?{gift:text_(row[4]),address:text_(row[9]),order:previousOrder}:null,emailStatus);
+ forgetLookup_(code);
+ // The row as just written (no extra sheet read needed).
+ const updated=row.slice();
+ [gift.id,giftName,d.recipient,d.email,d.phone,d.postal,d.address,d.note,'Requested',row[12],text_(row[13])||now,now].forEach((v,i)=>{updated[3+i]=v;});
+ updated[19]=firstSubmitted;updated[GIFT_ORDER_COLUMN-1]=orderId;updated[GIFT_CLOSE_COLUMN-1]=changesCloseAt_(firstSubmitted);
+ const emailStatus=sendOrQueueEmails_(sheet,found.row,updated,language,row[3]?{gift:text_(row[4]),address:text_(row[9]),order:previousOrder}:null,true);
  return {saved:true,giftId:gift.id,gift_name:text_(updated[4]),status:'Requested',order_id:orderId,emailStatus,first_submitted_at:firstSubmitted};
 }
 
@@ -243,6 +277,7 @@ function changesCloseAt_(firstSubmitted){const t=Date.parse(firstSubmitted);retu
 // Installable trigger (created by setupGiftStandalone): when Status on Couples changes, record which order it refers to.
 function onGiftSheetEdit(e){
  try{
+  bumpCacheGen_(); // any manual edit (Status, Tracking, Catalogue, Gift settings…) shows on the website at once
   const range=e&&e.range;if(!range)return;
   const sheet=range.getSheet();if(sheet.getName()!==COUPLES_TAB)return;
   const c1=range.getColumn(),c2=c1+range.getNumColumns()-1;if(GIFT_STATUS_COLUMN<c1||GIFT_STATUS_COLUMN>c2)return;
@@ -250,6 +285,8 @@ function onGiftSheetEdit(e){
   syncOrderedIds_(sheet,r1,r2-r1+1);
  }catch(error){console.warn('Status helper: '+(error.message||error));}
 }
+// Installable trigger on the RSVP spreadsheet: name, attendance or "Gift enabled" edits apply at once.
+function onRsvpSheetEdit(){try{bumpCacheGen_();}catch(error){console.warn('RSVP edit helper: '+(error.message||error));}}
 function syncOrderedIds_(sheet,firstRow,count){
  if(sheet.getMaxColumns()<GIFT_ROW_WIDTH)return;
  const status=sheet.getRange(firstRow,GIFT_STATUS_COLUMN,count,1).getValues();
@@ -286,7 +323,7 @@ function admin_(action,p){
  if(GIFT_STATUSES.slice(1).indexOf(p.status)<0||!found.value[3])throw fault_('Please check the selection and delivery status.',400,'invalid');
  sheet.getRange(found.row,12,1,4).setValues([[p.status,cell_(text_(p.tracking).slice(0,150)),found.value[13],new Date().toISOString()]]);
  syncOrderedIds_(sheet,found.row,1);
- SpreadsheetApp.flush();return {saved:true};
+ SpreadsheetApp.flush();forgetLookup_(code);return {saved:true};
 }
 
 /* ───────────── Sheets ───────────── */
@@ -300,9 +337,17 @@ function sheetIdProperty_(name){
  if(!id)throw fault_('Script property '+name+' is not set (Project Settings › Script properties).',503,'service');
  return id;
 }
-function couplesSheet_(){
+// One header read checks A:P (and, when withExtras, Q:AC; they are repaired only if something is missing).
+function couplesSheet_(withExtras){
  const sheet=giftBook_().getSheetByName(COUPLES_TAB);
- if(!sheet||sheet.getRange(1,1,1,16).getValues()[0].map(text_).join('|')!==GIFT_HEADERS.join('|'))throw fault_('The organiser sheet needs its original column headers.',503,'service');
+ if(!sheet)throw fault_('The organiser sheet needs its original column headers.',503,'service');
+ const width=withExtras?Math.min(GIFT_ROW_WIDTH,sheet.getMaxColumns()):16;
+ const headers=sheet.getRange(1,1,1,width).getValues()[0].map(text_);
+ if(headers.slice(0,16).join('|')!==GIFT_HEADERS.join('|'))throw fault_('The organiser sheet needs its original column headers.',503,'service');
+ if(withExtras){
+  const expected=GIFT_EMAIL_HEADERS.concat(['First submitted at'],GIFT_ACTIVITY_HEADERS,GIFT_ORDER_HEADERS);
+  if(headers.slice(16).join('|')!==expected.join('|')){ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);}
+ }
  return sheet;
 }
 function findCoupleRow_(sheet,code){
@@ -318,7 +363,7 @@ function ensureCoupleRow_(sheet,entry){
  const found=findCoupleRow_(sheet,entry.code);
  const first=entry.names[0],second=entry.names[1]||'';
  if(found){
-  if(text_(found.value[1])!==first||text_(found.value[2])!==second){sheet.getRange(found.row,2,1,2).setValues([[cell_(first),cell_(second)]]);found.value[1]=first;found.value[2]=second;}
+  if(text_(found.value[1])!==first||text_(found.value[2])!==second){sheet.getRange(found.row,2,1,2).setValues([[cell_(first),cell_(second)]]);found.value[1]=first;found.value[2]=second;forgetLookup_(entry.code);}
   return found;
  }
  const now=new Date().toISOString(),row=Math.max(2,sheet.getLastRow()+1);
@@ -333,10 +378,10 @@ function syncRsvp_(sheet,registry){registry.forEach(entry=>ensureCoupleRow_(shee
 
 // Cached guest list for fast code checks. A code missing from the cache is re-checked against the sheet.
 function registryEntry_(code){
- const cache=CacheService.getScriptCache(),hit=cache.get('registry-v1');
+ const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v2'),hit=cache.get(key);
  if(hit){const entry=new Map(JSON.parse(hit)).get(code);if(entry)return entry;}
  const registry=rsvpRegistry_(),json=JSON.stringify(Array.from(registry.entries()));
- if(json.length<90000)cache.put('registry-v1',json,GIFT_REGISTRY_CACHE_SECONDS);
+ if(json.length<90000)cache.put(key,json,cacheState_().seconds===GIFT_LONG_CACHE_SECONDS?GIFT_LONG_CACHE_SECONDS:GIFT_REGISTRY_CACHE_SECONDS);
  const entry=registry.get(code);
  if(!entry)throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');
  return entry;
@@ -407,11 +452,21 @@ function ensureStatusHelpers_(sheet){
  rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(ORDERED_MISMATCH_FORMULA).setBackground('#f4c7c3').setFontColor('#922139').setRanges([sheet.getRange(2,GIFT_ORDERED_COLUMN,rows,1)]).build());
  sheet.setConditionalFormatRules(rules);
 }
+// Three small triggers: edits on each spreadsheet (keep the website up to date) and a background email sender.
 function ensureEditTrigger_(){
- if(ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='onGiftSheetEdit'))return;
- ScriptApp.newTrigger('onGiftSheetEdit').forSpreadsheet(giftSheetId_()).onEdit().create();
+ const has=name=>ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()===name);
+ if(!has('onGiftSheetEdit'))ScriptApp.newTrigger('onGiftSheetEdit').forSpreadsheet(giftSheetId_()).onEdit().create();
+ if(!has('onRsvpSheetEdit'))ScriptApp.newTrigger('onRsvpSheetEdit').forSpreadsheet(rsvpSheetId_()).onEdit().create();
+ if(!has('processGiftEmailQueue'))ScriptApp.newTrigger('processGiftEmailQueue').timeBased().everyMinutes(1).create();
+ const props=PropertiesService.getScriptProperties();
+ props.setProperty('EDIT_TRIGGERS','2');props.setProperty('MAIL_TRIGGER','1');
+ bumpCacheGen_();
 }
-function editTriggerInstalled_(){return ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='onGiftSheetEdit');}
+function missingTriggers_(){
+ const names=ScriptApp.getProjectTriggers().map(t=>t.getHandlerFunction());
+ return ['onGiftSheetEdit','onRsvpSheetEdit','processGiftEmailQueue'].filter(n=>names.indexOf(n)<0);
+}
+function editTriggerInstalled_(){return !missingTriggers_().length;}
 function ensureOrdersTab_(book){
  let sh=book.getSheetByName(ORDERS_TAB);
  if(!sh){sh=book.insertSheet(ORDERS_TAB);sh.getRange(1,1,1,ORDER_HEADERS.length).setValues([ORDER_HEADERS]);sh.setFrozenRows(1);return sh;}
@@ -561,7 +616,7 @@ function retryGiftEmails(){
  try{
   const sheet=couplesSheet_();ensureEmailColumns_(sheet);
   const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),Math.min(GIFT_ROW_WIDTH,sheet.getMaxColumns())).getValues();
-  rows.forEach((r,i)=>{if(r[3]&&r[6]&&/^Failed/.test(text_(r[16])))sendGiftConfirmation_(sheet,i+2,r,text_(r[18])==='my'?'my':'en');});
+  rows.forEach((r,i)=>{if(r[3]&&r[6]&&/^(Failed|Queued)/.test(text_(r[16])))sendGiftConfirmation_(sheet,i+2,r,text_(r[18])==='my'?'my':'en');});
  }finally{lock.releaseLock();}
 }
 
@@ -596,7 +651,8 @@ function checkGiftSetup(){
   if(headers.join('|')!==ORDER_HEADERS.join('|'))throw new Error('Headers changed. Expected: '+ORDER_HEADERS.join(', '));
   return Math.max(0,sh.getLastRow()-1)+' order line(s)';
  });
- step('Status helper (edit trigger)',()=>{if(!editTriggerInstalled_())throw new Error('Not installed. Run setupGiftStandalone.');return 'records "Ordered order ID" when you change Status';});
+ step('Helpers (triggers)',()=>{const missing=missingTriggers_();if(missing.length)throw new Error('Not installed: '+missing.join(', ')+'. Run setupGiftStandalone.');return 'sheet edits show on the website at once; emails are sent in the background; "Ordered order ID" is recorded';});
+ step('Email queue',()=>{const waiting=Object.keys(PropertiesService.getScriptProperties().getProperties()).filter(k=>k.indexOf(MAIL_QUEUE_PREFIX)===0).length;return waiting?waiting+' email batch(es) waiting (sent within a minute)':'empty';});
  step('Catalogue tab',()=>{
   const gifts=readCatalogue_(),enabled=gifts.filter(g=>g.enabled);
   if(!enabled.length)throw new Error('No enabled gifts. Tick Enabled for at least one row.');
@@ -672,6 +728,34 @@ function sendGiftConfirmation_(sheet,row,r,language){
   try{sheet.getRange(row,17,1,3).setValues([[status,fingerprint,language]]);SpreadsheetApp.flush();}catch(ignore){}
   return attempted?'pending':'failed';
  }
+}
+
+// Confirmation + organiser emails are sent by a background job (every minute) so guests are not kept waiting.
+// Without that trigger (setup not run yet) they are sent straight away, as before.
+function sendOrQueueEmails_(sheet,rowNo,r,language,previous,notify){
+ if(!cacheState_().mailTrigger){const status=sendGiftConfirmation_(sheet,rowNo,r,language);if(notify)notifyOrganiser_(r,previous,status);return status;}
+ sheet.getRange(rowNo,17).setValue('Queued');
+ PropertiesService.getScriptProperties().setProperty(MAIL_QUEUE_PREFIX+Date.now()+'_'+Utilities.getUuid().slice(0,8)+'_'+text_(r[0]),JSON.stringify({code:text_(r[0]),language,notify,previous:previous||null,row:r.map(text_)}));
+ return 'queued';
+}
+function processGiftEmailQueue(){
+ const props=PropertiesService.getScriptProperties();
+ const keys=Object.keys(props.getProperties()).filter(k=>k.indexOf(MAIL_QUEUE_PREFIX)===0).sort();
+ if(!keys.length)return;
+ // Claim the waiting items under the lock, then send without holding it (guests can keep ordering meanwhile).
+ const lock=LockService.getScriptLock();if(!lock.tryLock(15000))return;
+ const items=[];
+ try{keys.forEach(k=>{const v=props.getProperty(k);if(v){items.push(JSON.parse(v));props.deleteProperty(k);}});}finally{lock.releaseLock();}
+ if(!items.length)return;
+ const sheet=couplesSheet_(true);
+ // One guest email per couple, with their latest details and language; one organiser notification per request.
+ const latest={},status={};
+ items.forEach(item=>{latest[item.code]=item;});
+ Object.keys(latest).forEach(code=>{
+  try{const found=findCoupleRow_(sheet,code);status[code]=found&&found.value[3]?sendGiftConfirmation_(sheet,found.row,found.value,latest[code].language):'failed';}
+  catch(error){status[code]='failed';console.warn('Guest email for '+code+': '+(error.message||error));}
+ });
+ items.forEach(item=>{try{if(item.notify)notifyOrganiser_(item.row,item.previous,status[item.code]);}catch(error){console.warn('Notification for '+item.code+': '+(error.message||error));}});
 }
 
 // Tells the organiser about every confirmed request (NEW, or CHANGED within the 48-hour window). Never blocks the guest.

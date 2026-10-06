@@ -54,7 +54,8 @@ const GIFT_ID = '1r9ngeMlOthZEMOjPIqVODOOtd2RxbtFa0ljARPOyiTQ';
 const RSVP_ID = '11SA4KyupcO7ElvLnXRSngOxbMIb6G035OtWJqGE_tdM';
 const COUPLES = ['Shared code','Partner one','Partner two','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Status','Tracking','Created at','Updated at','QR link'];
 
-export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
+export function setup(opts = {}) {
+  const {mailQuota = 100, extraRsvpRows = []} = opts;
   // Same columns as the real RSVP sheet ("Shared code" holds the gift code).
   const H = ['Timestamp','Language','Attending','Shared code','Relationship','Name','Kana / Reading','Party size','Guest name(s)','Kids','Station','Allergy / dietary notes','2次会 (afterparty)','Message'];
   const guest = (name, partner, attending, party) => H.map(h => ({Name: name, 'Guest name(s)': partner, Attending: attending, 'Party size': party, Language: 'en'})[h] ?? '');
@@ -74,9 +75,9 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
     SpreadsheetApp: {openById: id => books[id], flush() {},
       newDataValidation: () => { const r = {}; const b = {requireValueInList: (v) => { r.list = v; return b; }, setAllowInvalid: v => { r.allowInvalid = v; return b; }, setHelpText: () => b, build: () => r}; return b; },
       newConditionalFormatRule: () => { const r = {}; const b = {whenFormulaSatisfied: f => { r.formula = f; return b; }, setBackground: c => { r.bg = c; return b; }, setFontColor: () => b, setRanges: x => { r.ranges = x; return b; }, build: () => ({...r, getBooleanCondition: () => ({getCriteriaValues: () => [r.formula]})})}; return b; }},
-    ScriptApp: {getProjectTriggers: () => triggers, newTrigger: fn => { const t = {fn}; const b = {forSpreadsheet: id => { t.id = id; return b; }, onEdit: () => b, create: () => { triggers.push({getHandlerFunction: () => fn, id: t.id}); }}; return b; }},
+    ScriptApp: {getProjectTriggers: () => triggers, newTrigger: fn => { const t = {fn}; const b = {forSpreadsheet: id => { t.id = id; return b; }, onEdit: () => b, timeBased: () => b, everyMinutes: m => { t.every = m; return b; }, create: () => { triggers.push({getHandlerFunction: () => fn, id: t.id, every: t.every}); }}; return b; }},
     LockService: {getScriptLock: () => { let held = false; return {tryLock: () => (held = true), waitLock: () => { held = true; }, hasLock: () => held, releaseLock: () => { held = false; }}; }},
-    PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }})},
+    PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = String(v); }, getProperties: () => ({...props}), deleteProperty: k => { delete props[k]; }})},
     CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; })})},
     MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { if (ctx.MailApp.getRemainingDailyQuota() < 1) throw new Error('quota'); (m.to === OWNER ? notices : mail).push(m); }},
     Session: {getEffectiveUser: () => ({getEmail: () => OWNER})},
@@ -91,7 +92,8 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   ctx.setupGiftStandalone();
   ctx.issueGiftCodesForConfiguredRows();
   const book = books[GIFT_ID];
-  const post = body => JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text);
+  // After a submit, run the background email job the way the every-minute trigger would.
+  const post = body => { const r = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text); if (body.action === 'submit' && !opts.noQueueRun) ctx.processGiftEmailQueue(); return r; };
   const header = rsvp.data[0];
   const codeIndex = header.indexOf('Shared code');
   const codeOf = row => rsvp.data[row - 1][codeIndex];
