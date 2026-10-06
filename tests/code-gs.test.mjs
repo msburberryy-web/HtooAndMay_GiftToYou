@@ -134,7 +134,7 @@ test('a duplicated RSVP code is blocked without breaking other guests', () => {
   const s = setup();
   const code = s.codeOf(2);
   const h = s.rsvp.data[0];
-  const dup = []; dup[h.indexOf('Name')] = 'Copy'; dup[h.indexOf('Attending')] = 'Yes'; dup[h.indexOf('Gift code')] = code;
+  const dup = []; dup[h.indexOf('Name')] = 'Copy'; dup[h.indexOf('Attending')] = 'Yes'; dup[s.codeIndex] = code;
   s.rsvp.data.push(dup.map(v => v ?? ''));
   assert.equal(s.post({action: 'lookup', code}).reason, 'not_found');
   assert.equal(s.post({action: 'lookup', code: s.codeOf(3)}).ok, true);
@@ -167,4 +167,71 @@ test('refused requests are written to the Executions log', () => {
   s.ctx.console.warn = m => warnings.push(m);
   s.post({action: 'lookup', code: 'ZZZZZZZZ'});
   assert.match(warnings[0], /^doPost lookup refused: 404 not_found/);
+});
+
+test('visits are recorded per couple without creating duplicate rows', () => {
+  const s = setup();
+  const code = s.codeOf(2);
+  assert.equal(s.post({action: 'track', code, event: 'visit'}).ok, true);
+  assert.equal(s.post({action: 'track', code, event: 'visit'}).ok, true);
+  const rows = s.couples.data.filter(r => r[0] === code);
+  assert.equal(rows.length, 1);
+  assert.deepEqual(s.couples.data[0].slice(20, 26), ['First visited at','Last visited at','Visits','Cart gift','Cart updated at','Saved gifts']);
+  assert.match(rows[0][20], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+  assert.equal(rows[0][22], '2');
+  assert.equal(s.post({action: 'track', code: 'ZZZZZZZZ', event: 'visit'}).reason, 'not_found');
+  assert.equal(s.post({action: 'track', code, event: 'hack'}).reason, 'invalid');
+});
+
+test('cart changes are recorded with the gift name, and cleared on removal', () => {
+  const s = setup();
+  const code = s.codeOf(2);
+  s.post({action: 'track', code, event: 'cart', giftId: 'hario-mug'});
+  const row = () => s.couples.data.find(r => r[0] === code);
+  assert.equal(row()[23], 'HARIO — Tea & coffee brewer mug');
+  assert.ok(row()[24]);
+  s.post({action: 'track', code, event: 'cart', giftId: ''});
+  assert.equal(row()[23], '');
+  assert.equal(s.post({action: 'track', code, event: 'cart', giftId: 'made-up'}).reason, 'invalid');
+});
+
+test('saved gifts: up to 5 known gifts, returned by lookup', () => {
+  const s = setup();
+  const code = s.codeOf(3);
+  assert.deepEqual(s.post({action: 'lookup', code}).data.saved, []);
+  const ids = ['hario-mug', 'hario-bowls', 'kinto-350-white'];
+  assert.deepEqual(s.post({action: 'save', code, saved: ids}).data.saved, ids);
+  assert.deepEqual(s.post({action: 'lookup', code}).data.saved, ids);
+  assert.equal(s.post({action: 'save', code, saved: ['hario-mug','hario-bowls','hario-teapot','hario-coffee','kinto-350-white','kinto-350-khaki']}).reason, 'limit');
+  assert.equal(s.post({action: 'save', code, saved: ['nope']}).reason, 'unavailable');
+  assert.equal(s.post({action: 'save', code, saved: ['hario-mug', 'hario-mug']}).reason, 'invalid');
+  assert.equal(s.post({action: 'save', code, saved: 'hario-mug'}).reason, 'invalid');
+  assert.deepEqual(s.post({action: 'save', code, saved: []}).data.saved, []);
+});
+
+test('guest list is cached; new codes still work at once', () => {
+  const s = setup();
+  s.post({action: 'lookup', code: s.codeOf(2)});
+  // Rename in RSVPs: the cached label stays until refresh…
+  s.rsvp.data[1][s.rsvp.data[0].indexOf('Name')] = 'Renamed';
+  assert.equal(s.post({action: 'lookup', code: s.codeOf(2)}).data.label, 'Aye Aye & Ko Ko');
+  s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'lookup', code: s.codeOf(2)}).data.label, 'Renamed & Ko Ko');
+  // …but a code typed into the sheet by hand is found immediately.
+  const h = s.rsvp.data[0];
+  const row = h.map(() => ''); row[h.indexOf('Name')] = 'New Guest'; row[h.indexOf('Attending')] = 'Yes'; row[s.codeIndex] = 'NEWCODE123';
+  s.rsvp.data.push(row);
+  assert.equal(s.post({action: 'lookup', code: 'NEWCODE123'}).data.label, 'New Guest');
+});
+
+test('submit still works after activity columns exist', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'track', code, event: 'visit'});
+  s.post({action: 'save', code, saved: ['hario-mug']});
+  const r = s.post({action: 'submit', code, consent: true, data: {gift_id: 'hario-mug', recipient: 'A', email: 'a@example.com', phone: '090-1234-5678', postal: '1234567', address: 'Tokyo 1-2-3 Room 4', note: ''}});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  const row = s.couples.data.find(x => x[0] === code);
+  assert.equal(row[11], 'Requested');
+  assert.equal(row[25], 'hario-mug');
 });
