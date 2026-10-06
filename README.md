@@ -1,9 +1,19 @@
 # Htoo & May — The Gift Edit
 
-Guest catalogue for GitHub Pages, retaining the existing private Sites backend and organiser dashboard. Guest codes, delivery records and Apps Script secrets are never bundled here.
+Guest gift catalogue for Htoo & May's wedding, published on GitHub Pages:
+https://msburberryy-web.github.io/HtooAndMay_GiftToYou/
 
-The Google Apps Script connection still needs authorisation and deployment before live orders can be enabled.
+- **Front end:** React + Vite (`app/`, `lib/`, `components/`). Built and deployed by GitHub Actions on every push to `main`.
+- **Back end:** Google Apps Script web app (`setup/Code.gs`) reading and writing the RSVP and Gift Manager Google Sheets. The page calls it at the URL in `lib/api.ts`.
+- **Guest codes, delivery details and secrets** are never stored in this repo.
 
-Build: `npm install` then `npm run build`. GitHub Pages publishes the `dist` folder.
+Setup, sheet management and the pre-launch live test: [`setup/INSTALL.md`](setup/INSTALL.md).
 
-Deployment status: build verified; GitHub upload was rejected by connector permissions. Before activating this build, the private backend must allow the exact GitHub origin using restricted CORS on the catalogue/selection routes. This change has not been published. Do not print new QR links until deployment and a live test succeed.
+```bash
+npm install
+npm run dev     # local preview
+npm test        # Apps Script logic against a simulated sheet
+npm run build   # type-check + production build into dist/
+```
+
+Product photos are still served from the old Sites domain. To host them here, add the files to `public/products/` and put the file names in the Catalogue tab's `Image` column.

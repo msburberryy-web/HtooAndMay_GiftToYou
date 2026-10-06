@@ -1,4 +1,3 @@
-'use client';
 type SavedOrder={gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;updated_at?:string};
 export default function OrderStatus({order,gift,language,busy,onRefresh}:{order:SavedOrder;gift?:{brand:string;name:string;image:string};language:'en'|'my';busy:boolean;onRefresh:()=>void}){
  const my=language==='my';
