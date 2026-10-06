@@ -23,12 +23,20 @@ const GIFT_EMAIL_HEADERS = ['Email status','Email fingerprint','Email language']
 const GIFT_STATUSES = ['Awaiting choice','Requested','Ordered','Shipped','Delivered'];
 // Couples columns U:Z — what each couple has done on the site (Japan time).
 const GIFT_ACTIVITY_HEADERS = ['First visited at','Last visited at','Visits','Cart gift','Cart updated at','Saved gifts'];
-const GIFT_ROW_WIDTH = 27; // A:AA
+const GIFT_ROW_WIDTH = 29; // A:AC
 // Couples column AA: the order ID of the couple's current order. Every confirmation is also kept, never overwritten,
 // as its own line in the Order history tab.
 const GIFT_ORDER_COLUMN = 27;
+// AB: when the guest can no longer change (first confirmation + 48 h). Order from the retailer after this time.
+// AC: which order ID the Status refers to — filled automatically when Status becomes Ordered/Shipped/Delivered.
+const GIFT_CLOSE_COLUMN = 28;
+const GIFT_ORDERED_COLUMN = 29;
+const GIFT_ORDER_HEADERS = ['Current order ID','Changes close at','Ordered order ID'];
+const GIFT_STATUS_COLUMN = 12;
+const GIFT_LOCKED_STATUSES = ['Ordered','Shipped','Delivered'];
+const ORDERED_MISMATCH_FORMULA = '=AND($AC2<>"",$AC2<>$AA2)';
 const ORDERS_TAB = 'Order history';
-const ORDER_HEADERS = ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces'];
+const ORDER_HEADERS = ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces','Superseded by'];
 const GIFT_MAX_SAVED = 5;
 // The guest list (RSVPs) is cached for an hour to make code checks fast. Unknown codes always re-read the sheet,
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
@@ -207,7 +215,7 @@ function submit_(p){
  const orderId=appendOrder_(row[3]?'CHANGED':'NEW',code,invite_(row).label||entry.label,gift.id,giftName,d,language,previousOrder);
  sheet.getRange(found.row,4,1,12).setNumberFormat('@').setValues([[cell_(gift.id),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),'Requested',row[12],text_(row[13])||now,now]]);
  sheet.getRange(found.row,20).setNumberFormat('@').setValue(firstSubmitted);
- sheet.getRange(found.row,GIFT_ORDER_COLUMN).setNumberFormat('@').setValue(orderId);
+ sheet.getRange(found.row,GIFT_ORDER_COLUMN,1,2).setNumberFormat('@').setValues([[orderId,changesCloseAt_(firstSubmitted)]]);
  SpreadsheetApp.flush();
  const updated=sheet.getRange(found.row,1,1,GIFT_ROW_WIDTH).getValues()[0];
  const emailStatus=sendGiftConfirmation_(sheet,found.row,updated,language);
@@ -222,8 +230,36 @@ function appendOrder_(type,code,couple,giftId,giftName,d,language,replaces){
  const ids=last<2?[]:sh.getRange(2,1,last-1,1).getValues().map(r=>{const m=/^HM-(\d+)$/.exec(text_(r[0]));return m?Number(m[1]):0;});
  const orderId='HM-'+String(Math.max(0,...ids)+1).padStart(4,'0');
  if(last+1>sh.getMaxRows())sh.insertRowsAfter(sh.getMaxRows(),1);
- sh.getRange(last+1,1,1,ORDER_HEADERS.length).setNumberFormat('@').setValues([[orderId,type,code,cell_(couple),cell_(giftId),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),language,japanNow_(),replaces||'']]);
+ sh.getRange(last+1,1,1,ORDER_HEADERS.length).setNumberFormat('@').setValues([[orderId,type,code,cell_(couple),cell_(giftId),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),language,japanNow_(),replaces||'','']]);
+ // Mark the replaced line so nobody works from an outdated order. Only this column of older lines is ever written.
+ if(replaces&&replaces!=='imported'&&last>=2){
+  const index=sh.getRange(2,1,last-1,1).getValues().findIndex(r=>text_(r[0])===replaces);
+  if(index>=0)sh.getRange(index+2,ORDER_HEADERS.length).setValue(orderId);
+ }
  return orderId;
+}
+function changesCloseAt_(firstSubmitted){const t=Date.parse(firstSubmitted);return Number.isFinite(t)?Utilities.formatDate(new Date(t+GIFT_REVISION_HOURS*3600000),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm'):'';}
+
+// Installable trigger (created by setupGiftStandalone): when Status on Couples changes, record which order it refers to.
+function onGiftSheetEdit(e){
+ try{
+  const range=e&&e.range;if(!range)return;
+  const sheet=range.getSheet();if(sheet.getName()!==COUPLES_TAB)return;
+  const c1=range.getColumn(),c2=c1+range.getNumColumns()-1;if(GIFT_STATUS_COLUMN<c1||GIFT_STATUS_COLUMN>c2)return;
+  const r1=Math.max(2,range.getRow()),r2=range.getRow()+range.getNumRows()-1;if(r2<r1)return;
+  syncOrderedIds_(sheet,r1,r2-r1+1);
+ }catch(error){console.warn('Status helper: '+(error.message||error));}
+}
+function syncOrderedIds_(sheet,firstRow,count){
+ if(sheet.getMaxColumns()<GIFT_ROW_WIDTH)return;
+ const status=sheet.getRange(firstRow,GIFT_STATUS_COLUMN,count,1).getValues();
+ const ids=sheet.getRange(firstRow,GIFT_ORDER_COLUMN,count,3).getValues();
+ const out=status.map((s,i)=>{
+  const st=text_(s[0]),current=text_(ids[i][0]),recorded=text_(ids[i][2]);
+  if(GIFT_LOCKED_STATUSES.indexOf(st)>=0)return [recorded||current]; // keep the first order it was set for (Ordered → Shipped keeps HM-0001)
+  return ['']; // back to Requested/Awaiting: nothing ordered yet
+ });
+ sheet.getRange(firstRow,GIFT_ORDERED_COLUMN,count,1).setNumberFormat('@').setValues(out);
 }
 
 function validateDelivery_(data){
@@ -249,6 +285,7 @@ function admin_(action,p){
  if(!found)throw fault_('Code not found.',404,'not_found');
  if(GIFT_STATUSES.slice(1).indexOf(p.status)<0||!found.value[3])throw fault_('Please check the selection and delivery status.',400,'invalid');
  sheet.getRange(found.row,12,1,4).setValues([[p.status,cell_(text_(p.tracking).slice(0,150)),found.value[13],new Date().toISOString()]]);
+ syncOrderedIds_(sheet,found.row,1);
  SpreadsheetApp.flush();return {saved:true};
 }
 
@@ -358,16 +395,44 @@ function ensureActivityColumns_(sheet){
   if(existing.some((v,i)=>v&&v!==GIFT_ACTIVITY_HEADERS[i]))throw new Error('Gift Manager columns U:Z must be available for visit, cart and saved-gift tracking.');
   sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).setValues([GIFT_ACTIVITY_HEADERS]);
  }
- const orderHeader=text_(sheet.getRange(1,GIFT_ORDER_COLUMN).getValues()[0][0]);
- if(orderHeader&&orderHeader!=='Current order ID')throw new Error('Gift Manager column AA must be available for Current order ID.');
- if(!orderHeader)sheet.getRange(1,GIFT_ORDER_COLUMN).setValue('Current order ID');
+ const orderHeaders=sheet.getRange(1,GIFT_ORDER_COLUMN,1,GIFT_ORDER_HEADERS.length).getValues()[0].map(text_);
+ if(orderHeaders.some((v,i)=>v&&v!==GIFT_ORDER_HEADERS[i]))throw new Error('Gift Manager columns AA:AC must be available for '+GIFT_ORDER_HEADERS.join(', ')+'.');
+ if(orderHeaders.join('|')!==GIFT_ORDER_HEADERS.join('|'))sheet.getRange(1,GIFT_ORDER_COLUMN,1,GIFT_ORDER_HEADERS.length).setValues([GIFT_ORDER_HEADERS]);
 }
+// Status dropdown (only the allowed values) and a red AC cell when the ordered order is not the current one.
+function ensureStatusHelpers_(sheet){
+ const rows=Math.max(1,sheet.getMaxRows()-1);
+ sheet.getRange(2,GIFT_STATUS_COLUMN,rows,1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(GIFT_STATUSES,true).setAllowInvalid(false).setHelpText('Choose a status from the list.').build());
+ const rules=sheet.getConditionalFormatRules().filter(rule=>{const c=rule.getBooleanCondition&&rule.getBooleanCondition();return !(c&&c.getCriteriaValues()[0]===ORDERED_MISMATCH_FORMULA);});
+ rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(ORDERED_MISMATCH_FORMULA).setBackground('#f4c7c3').setFontColor('#922139').setRanges([sheet.getRange(2,GIFT_ORDERED_COLUMN,rows,1)]).build());
+ sheet.setConditionalFormatRules(rules);
+}
+function ensureEditTrigger_(){
+ if(ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='onGiftSheetEdit'))return;
+ ScriptApp.newTrigger('onGiftSheetEdit').forSpreadsheet(giftSheetId_()).onEdit().create();
+}
+function editTriggerInstalled_(){return ScriptApp.getProjectTriggers().some(t=>t.getHandlerFunction()==='onGiftSheetEdit');}
 function ensureOrdersTab_(book){
  let sh=book.getSheetByName(ORDERS_TAB);
  if(!sh){sh=book.insertSheet(ORDERS_TAB);sh.getRange(1,1,1,ORDER_HEADERS.length).setValues([ORDER_HEADERS]);sh.setFrozenRows(1);return sh;}
  const headers=sh.getRange(1,1,1,ORDER_HEADERS.length).getValues()[0].map(text_);
- if(headers.join('|')!==ORDER_HEADERS.join('|'))throw new Error('The Order history tab needs its original column headers: '+ORDER_HEADERS.join(', '));
- return sh;
+ if(headers.join('|')===ORDER_HEADERS.join('|'))return sh;
+ // Tabs created before "Superseded by" existed: add the new header once.
+ if(headers.slice(0,-1).join('|')===ORDER_HEADERS.slice(0,-1).join('|')&&!headers[ORDER_HEADERS.length-1]){sh.getRange(1,ORDER_HEADERS.length).setValue(ORDER_HEADERS[ORDER_HEADERS.length-1]);return sh;}
+ throw new Error('The Order history tab needs its original column headers: '+ORDER_HEADERS.join(', '));
+}
+// Fills "Superseded by" for existing lines from their Replaces links (safe to run again).
+function backfillSuperseded_(sh){
+ const last=sh.getLastRow();if(last<2)return;
+ const rows=sh.getRange(2,1,last-1,ORDER_HEADERS.length).getValues(),by={};
+ rows.forEach(r=>{const rep=text_(r[14]);if(rep&&rep!=='imported')by[rep]=text_(r[0]);});
+ const col=rows.map(r=>[text_(r[15])||by[text_(r[0])]||'']);
+ sh.getRange(2,ORDER_HEADERS.length,col.length,1).setValues(col);
+}
+function backfillCloseTimes_(sheet){
+ const last=sheet.getLastRow();if(last<2)return;
+ const rows=sheet.getRange(2,1,last-1,GIFT_ROW_WIDTH).getValues();
+ rows.forEach((r,i)=>{if(text_(r[3])&&!text_(r[GIFT_CLOSE_COLUMN-1]))sheet.getRange(i+2,GIFT_CLOSE_COLUMN).setNumberFormat('@').setValue(changesCloseAt_(text_(r[19]||r[14]||r[13])));});
 }
 // One-time: orders confirmed before Order history existed get an ID and a history line (Type NEW, Replaces "imported").
 function backfillOrders_(sheet){
@@ -426,6 +491,9 @@ function setupGiftStandalone(){
  ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);sheet.setFrozenRows(1);sheet.setFrozenColumns(3);
  ensureCatalogueTab_(book);ensureSettingsTab_(book);ensureOrdersTab_(book);refreshCatalogueNow();
  const imported=backfillOrders_(sheet);if(imported)console.log(imported+' earlier order(s) added to Order history.');
+ backfillSuperseded_(ensureOrdersTab_(book));
+ backfillCloseTimes_(sheet);syncOrderedIds_(sheet,2,Math.max(1,sheet.getLastRow()-1));
+ ensureStatusHelpers_(sheet);ensureEditTrigger_();
  MailApp.getRemainingDailyQuota(); // Requests send-mail permission; does not send anything.
  const props=PropertiesService.getScriptProperties();
  if(!props.getProperty('GIFT_TOKEN'))props.setProperty('GIFT_TOKEN',(Utilities.getUuid()+Utilities.getUuid()).replace(/-/g,''));
@@ -486,7 +554,7 @@ function checkGiftSetup(){
   const sheet=couplesSheet_();
   const activity=sheet.getMaxColumns()>=GIFT_ROW_WIDTH?sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).getValues()[0].map(text_).join('|'):'';
   if(activity!==GIFT_ACTIVITY_HEADERS.join('|'))throw new Error('Columns U:Z ('+GIFT_ACTIVITY_HEADERS.join(', ')+') are not set up. Run setupGiftStandalone.');
-  if(text_(sheet.getRange(1,GIFT_ORDER_COLUMN).getValues()[0][0])!=='Current order ID')throw new Error('Column AA (Current order ID) is not set up. Run setupGiftStandalone.');
+  if(sheet.getRange(1,GIFT_ORDER_COLUMN,1,GIFT_ORDER_HEADERS.length).getValues()[0].map(text_).join('|')!==GIFT_ORDER_HEADERS.join('|'))throw new Error('Columns AA:AC ('+GIFT_ORDER_HEADERS.join(', ')+') are not set up. Run setupGiftStandalone.');
   return Math.max(0,sheet.getLastRow()-1)+' row(s)';
  });
  step('Gift settings tab',()=>{
@@ -500,6 +568,7 @@ function checkGiftSetup(){
   if(headers.join('|')!==ORDER_HEADERS.join('|'))throw new Error('Headers changed. Expected: '+ORDER_HEADERS.join(', '));
   return Math.max(0,sh.getLastRow()-1)+' order line(s)';
  });
+ step('Status helper (edit trigger)',()=>{if(!editTriggerInstalled_())throw new Error('Not installed. Run setupGiftStandalone.');return 'records "Ordered order ID" when you change Status';});
  step('Catalogue tab',()=>{
   const gifts=readCatalogue_(),enabled=gifts.filter(g=>g.enabled);
   if(!enabled.length)throw new Error('No enabled gifts. Tick Enabled for at least one row.');
@@ -591,7 +660,8 @@ function notifyOrganiser_(r,previous,guestEmailStatus){
   const lines=[['Order ID',orderId+(previous&&previous.order?' (replaces '+previous.order+')':'')],['Couple',label],['Gift',text_(r[4])]].concat(previous&&previous.gift!==text_(r[4])?[['Previous gift',previous.gift]]:[])
    .concat([['Recipient',text_(r[5])],['Email',text_(r[6])],['Phone',text_(r[7])],['Postcode',text_(r[8])],['Address',text_(r[9])]])
    .concat(previous&&previous.address!==text_(r[9])?[['Previous address',previous.address]]:[])
-   .concat([['Note',text_(r[10])||'—'],['Confirmed at',japanTime_(text_(r[14]))],['Guest email',guestEmailStatus],['Code',text_(r[0])]]);
+   .concat([['Note',text_(r[10])||'—'],['Confirmed at',japanTime_(text_(r[14]))],['Changes close at',text_(r[GIFT_CLOSE_COLUMN-1])+' (order from the retailer after this time)'],['Guest email',guestEmailStatus],['Code',text_(r[0])]])
+   .concat(previous&&previous.order?[['⚠ Reminder','If you already started ordering '+previous.order+', contact the guest before buying '+orderId+'.']]:[]);
   const sheetUrl='https://docs.google.com/spreadsheets/d/'+giftSheetId_()+'/edit';
   const e=escapeHtml_;
   const html='<div style="font-family:Arial,sans-serif;color:'+MAIL.ink+';max-width:600px"><p style="margin:0 0 4px;font-size:12px;letter-spacing:2px;color:'+MAIL.gold+'">GIFT REQUEST · '+kind+'</p><h2 style="margin:0 0 14px;font-family:Georgia,serif;font-weight:normal;color:'+MAIL.burgundy+'">'+e(label)+'</h2><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%">'

@@ -18,6 +18,10 @@ class Range {
   setNumberFormat() { return this; }
   insertCheckboxes() { return this; }
   getRow() { return this.row; }
+  getColumn() { return this.col; }
+  getNumColumns() { return this.cols; }
+  getSheet() { return this.sheet; }
+  setDataValidation(rule) { this.sheet.validation = {col: this.col, rule}; return this; }
   getNumRows() { return this.rows; }
 }
 class Sheet {
@@ -33,6 +37,9 @@ class Sheet {
   insertRowsAfter(_, n) { this.maxRows += n; }
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   setFrozenRows() {} setFrozenColumns() {}
+  getName() { return this.name; }
+  getConditionalFormatRules() { return this.cfRules || []; }
+  setConditionalFormatRules(r) { this.cfRules = r; }
 }
 class Book {
   constructor(id, sheets) { this.id = id; this.sheets = sheets; }
@@ -61,10 +68,13 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   ]);
   const couples = new Sheet('Couples', [COUPLES], 16);
   const books = {[GIFT_ID]: new Book(GIFT_ID, {Couples: couples}), [RSVP_ID]: new Book(RSVP_ID, {RSVPs: rsvp})};
-  const props = {GIFT_SHEET_ID: GIFT_ID, RSVP_SHEET_ID: RSVP_ID}, cache = {}, mail = [], notices = [];
+  const props = {GIFT_SHEET_ID: GIFT_ID, RSVP_SHEET_ID: RSVP_ID}, cache = {}, mail = [], notices = [], triggers = [];
     const ctx = {
     console: {log() {}, warn() {}, error() {}},
-    SpreadsheetApp: {openById: id => books[id], flush() {}},
+    SpreadsheetApp: {openById: id => books[id], flush() {},
+      newDataValidation: () => { const r = {}; const b = {requireValueInList: (v) => { r.list = v; return b; }, setAllowInvalid: v => { r.allowInvalid = v; return b; }, setHelpText: () => b, build: () => r}; return b; },
+      newConditionalFormatRule: () => { const r = {}; const b = {whenFormulaSatisfied: f => { r.formula = f; return b; }, setBackground: c => { r.bg = c; return b; }, setFontColor: () => b, setRanges: x => { r.ranges = x; return b; }, build: () => ({...r, getBooleanCondition: () => ({getCriteriaValues: () => [r.formula]})})}; return b; }},
+    ScriptApp: {getProjectTriggers: () => triggers, newTrigger: fn => { const t = {fn}; const b = {forSpreadsheet: id => { t.id = id; return b; }, onEdit: () => b, create: () => { triggers.push({getHandlerFunction: () => fn, id: t.id}); }}; return b; }},
     LockService: {getScriptLock: () => { let held = false; return {tryLock: () => (held = true), waitLock: () => { held = true; }, hasLock: () => held, releaseLock: () => { held = false; }}; }},
     PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }})},
     CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; })})},
@@ -86,5 +96,5 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   const codeIndex = header.indexOf('Shared code');
   const codeOf = row => rsvp.data[row - 1][codeIndex];
   const setSetting = (key, value) => { const s = book.sheets['Gift settings']; const r = s.data.findIndex(x => x[0] === key); s.data[r][1] = value; ctx.refreshCatalogueNow(); };
-  return {ctx, books, book, rsvp, couples, props, mail, notices, post, codeOf, codeIndex, setSetting};
+  return {ctx, books, book, rsvp, couples, props, mail, notices, triggers, post, codeOf, codeIndex, setSetting};
 }

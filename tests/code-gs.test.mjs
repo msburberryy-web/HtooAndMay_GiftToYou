@@ -327,7 +327,7 @@ test('order history: every new or changed request is its own line with an order 
   assert.equal(other.data.order_id, 'HM-0003');
 
   const hist = s.book.sheets['Order history'].data;
-  assert.deepEqual(hist[0], ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces']);
+  assert.deepEqual(hist[0], ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces','Superseded by']);
   assert.equal(hist.length, 4);
   assert.deepEqual(hist.slice(1).map(r => [r[0], r[1], r[4], r[10], r[14]]), [
     ['HM-0001', 'NEW', 'hario-mug', 'Shibuya 1-2-3 Room 4', ''],
@@ -357,4 +357,84 @@ test('setup gives earlier orders an ID in Order history', () => {
   assert.equal(s.book.sheets['Order history'].data[1][14], 'imported');
   s.ctx.setupGiftStandalone();
   assert.equal(s.book.sheets['Order history'].data.length, 2, 'running setup again adds nothing');
+});
+
+const D = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Shibuya 1-2-3 Room 4', note: ''};
+const editStatus = (s, row, value) => { s.couples.data[row - 1][11] = value; s.ctx.onGiftSheetEdit({range: s.couples.getRange(row, 12)}); };
+
+test('safeguard: older order lines are marked "Superseded by"', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: D});
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-bowls'}});
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-teapot'}});
+  const hist = s.book.sheets['Order history'].data;
+  assert.deepEqual(hist.slice(1).map(r => [r[0], r[14], r[15]]), [['HM-0001', '', 'HM-0002'], ['HM-0002', 'HM-0001', 'HM-0003'], ['HM-0003', 'HM-0002', '']]);
+});
+
+test('safeguard: "Changes close at" is 48 hours after the first confirmation and does not move', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  const r1 = s.post({action: 'submit', code, consent: true, data: D});
+  const row = () => s.couples.data.find(r => r[0] === code);
+  assert.deepEqual(s.couples.data[0].slice(26, 29), ['Current order ID', 'Changes close at', 'Ordered order ID']);
+  const expected = s.ctx.Utilities.formatDate(new Date(Date.parse(r1.data.first_submitted_at) + 48 * 3600000), 'Asia/Tokyo', 'yyyy-MM-dd HH:mm');
+  assert.equal(row()[27], expected);
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-bowls'}});
+  assert.equal(row()[27], expected);
+  assert.match(s.notices[0].body, /Changes close at: .* \(order from the retailer after this time\)/);
+});
+
+test('safeguard: Status edits record which order they refer to; mismatch is flagged', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: D});
+  const rowNo = s.couples.data.findIndex(r => r[0] === code) + 1;
+  const row = () => s.couples.data[rowNo - 1];
+  editStatus(s, rowNo, 'Ordered');
+  assert.equal(row()[28], 'HM-0001');
+  editStatus(s, rowNo, 'Shipped');
+  assert.equal(row()[28], 'HM-0001', 'moving on to Shipped keeps the original order');
+  // organiser moves it back to Requested; the guest changes → AC cleared, then set again for the new order
+  editStatus(s, rowNo, 'Requested');
+  assert.equal(row()[28], '');
+  // edge case: Ordered set for HM-0001, then reverted by mistake while guest changes → mismatch visible via rule
+  editStatus(s, rowNo, 'Ordered');
+  s.couples.data[rowNo - 1][11] = 'Requested'; // reverted without the trigger (e.g. pasted value)
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-bowls'}});
+  assert.equal(row()[26], 'HM-0002');
+  assert.equal(row()[28], 'HM-0001');
+  const rule = s.couples.getConditionalFormatRules().find(r => r.formula === '=AND($AC2<>"",$AC2<>$AA2)');
+  assert.ok(rule && rule.bg === '#f4c7c3', 'red highlight rule installed for column AC');
+  // edits outside the Status column are ignored
+  s.ctx.onGiftSheetEdit({range: s.couples.getRange(rowNo, 6)});
+  assert.equal(row()[28], 'HM-0001');
+});
+
+test('safeguard: Status dropdown, edit trigger installed once, notification reminder', () => {
+  const s = setup(); s.setSetting('Open', true);
+  assert.equal(s.couples.validation.col, 12);
+  assert.equal(JSON.stringify(s.couples.validation.rule.list), JSON.stringify(['Awaiting choice','Requested','Ordered','Shipped','Delivered']));
+  assert.equal(s.couples.validation.rule.allowInvalid, false);
+  assert.equal(s.triggers.length, 1);
+  s.ctx.setupGiftStandalone();
+  assert.equal(s.triggers.length, 1, 'no duplicate trigger');
+  assert.equal(s.couples.getConditionalFormatRules().length, 1, 'no duplicate highlight rule');
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: D});
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-bowls'}});
+  assert.match(s.notices[1].body, /⚠ Reminder: If you already started ordering HM-0001, contact the guest before buying HM-0002\./);
+  assert.doesNotMatch(s.notices[0].body, /Reminder/);
+});
+
+test('safeguard: setup upgrades an Order history tab created before "Superseded by"', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: D});
+  s.post({action: 'submit', code, consent: true, data: {...D, gift_id: 'hario-bowls'}});
+  const hist = s.book.sheets['Order history'].data;
+  hist.forEach(r => { r.length = 15; }); // old 15-column tab
+  s.ctx.setupGiftStandalone();
+  assert.equal(hist[0][15], 'Superseded by');
+  assert.equal(hist[1][15], 'HM-0002');
 });
