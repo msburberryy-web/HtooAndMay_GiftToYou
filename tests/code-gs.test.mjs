@@ -262,7 +262,7 @@ test('organiser is notified of NEW and CHANGED requests', () => {
   const d = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Tokyo 1-2-3 Room 4', note: ''};
   s.post({action: 'submit', code, consent: true, data: d});
   assert.equal(s.notices.length, 1);
-  assert.match(s.notices[0].subject, /^\[Gift NEW\] Aye Aye & Ko Ko — HARIO — Tea & coffee brewer mug$/);
+  assert.match(s.notices[0].subject, /^\[Gift NEW\] HM-0001 · Aye Aye & Ko Ko — HARIO — Tea & coffee brewer mug$/);
   assert.match(s.notices[0].body, /Recipient: Aye Aye/);
   assert.match(s.notices[0].body, /docs\.google\.com\/spreadsheets\/d\//);
   s.post({action: 'submit', code, consent: true, data: {...d, gift_id: 'hario-bowls'}});
@@ -307,4 +307,54 @@ test('checkGiftSetup warns about short, guessable codes', () => {
   const lines = []; s.ctx.console.log = m => lines.push(m);
   s.ctx.checkGiftSetup();
   assert.ok(lines.some(l => l.startsWith('⚠️ 1 code(s) are shorter than 12')), lines.join('\n'));
+});
+
+test('order history: every new or changed request is its own line with an order ID', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  const d = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Shibuya 1-2-3 Room 4', note: ''};
+  const first = s.post({action: 'submit', code, consent: true, data: d});
+  assert.equal(first.data.order_id, 'HM-0001');
+  const second = s.post({action: 'submit', code, consent: true, data: {...d, gift_id: 'hario-bowls', address: 'Shinjuku 4-5-6 Room 7'}});
+  assert.equal(second.data.order_id, 'HM-0002');
+  // identical resubmission: same order, no new line, no extra emails
+  const notices = s.notices.length, mails = s.mail.length;
+  const again = s.post({action: 'submit', code, consent: true, data: {...d, gift_id: 'hario-bowls', address: 'Shinjuku 4-5-6 Room 7'}});
+  assert.equal(again.data.order_id, 'HM-0002');
+  assert.equal(s.notices.length, notices);
+  assert.equal(s.mail.length, mails);
+  const other = s.post({action: 'submit', code: s.codeOf(3), consent: true, data: {...d, recipient: 'Su Su'}});
+  assert.equal(other.data.order_id, 'HM-0003');
+
+  const hist = s.book.sheets['Order history'].data;
+  assert.deepEqual(hist[0], ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces']);
+  assert.equal(hist.length, 4);
+  assert.deepEqual(hist.slice(1).map(r => [r[0], r[1], r[4], r[10], r[14]]), [
+    ['HM-0001', 'NEW', 'hario-mug', 'Shibuya 1-2-3 Room 4', ''],
+    ['HM-0002', 'CHANGED', 'hario-bowls', 'Shinjuku 4-5-6 Room 7', 'HM-0001'],
+    ['HM-0003', 'NEW', 'hario-mug', 'Shibuya 1-2-3 Room 4', ''],
+  ]);
+  // Couples holds the current order
+  const row = s.couples.data.find(r => r[0] === code);
+  assert.equal(s.couples.data[0][26], 'Current order ID');
+  assert.equal(row[26], 'HM-0002');
+  assert.equal(row[9], 'Shinjuku 4-5-6 Room 7');
+  assert.equal(s.post({action: 'lookup', code}).data.selection.order_id, 'HM-0002');
+  // shown in the guest email and the notification
+  assert.ok(s.mail.at(-1).htmlBody.includes('HM-0003'));
+  assert.match(s.notices.find(n => /HM-0002/.test(n.subject)).body, /Order ID: HM-0002 \(replaces HM-0001\)/);
+});
+
+test('setup gives earlier orders an ID in Order history', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: {gift_id: 'hario-mug', recipient: 'A', email: 'a@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Shibuya 1-2-3 Room 4', note: ''}});
+  // simulate an order made before order IDs existed
+  s.couples.data.find(r => r[0] === code)[26] = '';
+  s.book.sheets['Order history'].data.length = 1;
+  s.ctx.setupGiftStandalone();
+  assert.equal(s.couples.data.find(r => r[0] === code)[26], 'HM-0001');
+  assert.equal(s.book.sheets['Order history'].data[1][14], 'imported');
+  s.ctx.setupGiftStandalone();
+  assert.equal(s.book.sheets['Order history'].data.length, 2, 'running setup again adds nothing');
 });
