@@ -146,3 +146,25 @@ test('bad JSON and unknown actions fail cleanly', () => {
   assert.equal(s.post({action: 'drop-tables'}).reason, 'invalid');
   assert.equal(JSON.parse(s.ctx.doGet().text).ok, true);
 });
+
+test('checkGiftSetup reports success, and names the broken part', () => {
+  const s = setup();
+  const lines = [];
+  s.ctx.console.log = m => lines.push(m);
+  s.ctx.checkGiftSetup();
+  assert.match(lines.at(-1), /All checks passed/, lines.join('\n'));
+  assert.ok(lines.some(l => /2 guest code\(s\) can log in/.test(l)));
+  s.book.sheets.Catalogue.data[0][0] = 'Gift ID';
+  lines.length = 0;
+  s.ctx.checkGiftSetup();
+  assert.ok(lines.some(l => l.startsWith('❌ Catalogue tab')), lines.join('\n'));
+  assert.match(lines.at(-1), /problem/);
+});
+
+test('refused requests are written to the Executions log', () => {
+  const s = setup();
+  const warnings = [];
+  s.ctx.console.warn = m => warnings.push(m);
+  s.post({action: 'lookup', code: 'ZZZZZZZZ'});
+  assert.match(warnings[0], /^doPost lookup refused: 404 not_found/);
+});

@@ -29,7 +29,7 @@ export async function callGiftApi<T>(action: string, payload: Record<string, unk
   try {
     body = await response.json();
   } catch {
-    throw new ApiError('Unexpected response', response.status, 'service');
+    throw new ApiError(`Unexpected response (HTTP ${response.status})`, response.status, 'service');
   }
   if (!response.ok || !body || body.ok !== true) {
     throw new ApiError(body?.error || 'Request failed', body?.status ?? response.status, body?.reason ?? 'service');
