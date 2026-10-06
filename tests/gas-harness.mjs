@@ -42,6 +42,7 @@ class Book {
   setSpreadsheetTimeZone() {}
 }
 
+export const OWNER = 'owner@example.com';
 const GIFT_ID = '1r9ngeMlOthZEMOjPIqVODOOtd2RxbtFa0ljARPOyiTQ';
 const RSVP_ID = '11SA4KyupcO7ElvLnXRSngOxbMIb6G035OtWJqGE_tdM';
 const COUPLES = ['Shared code','Partner one','Partner two','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Status','Tracking','Created at','Updated at','QR link'];
@@ -60,14 +61,15 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   ]);
   const couples = new Sheet('Couples', [COUPLES], 16);
   const books = {[GIFT_ID]: new Book(GIFT_ID, {Couples: couples}), [RSVP_ID]: new Book(RSVP_ID, {RSVPs: rsvp})};
-  const props = {}, cache = {}, mail = [];
+  const props = {GIFT_SHEET_ID: GIFT_ID, RSVP_SHEET_ID: RSVP_ID}, cache = {}, mail = [], notices = [];
     const ctx = {
     console: {log() {}, warn() {}, error() {}},
     SpreadsheetApp: {openById: id => books[id], flush() {}},
     LockService: {getScriptLock: () => { let held = false; return {tryLock: () => (held = true), waitLock: () => { held = true; }, hasLock: () => held, releaseLock: () => { held = false; }}; }},
     PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }})},
     CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; })})},
-    MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { mail.push(m); }},
+    MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { if (ctx.MailApp.getRemainingDailyQuota() < 1) throw new Error('quota'); (m.to === OWNER ? notices : mail).push(m); }},
+    Session: {getEffectiveUser: () => ({getEmail: () => OWNER})},
     Utilities: {getUuid: () => randomUUID(), formatDate: (d, tz, fmt) => {
       const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(d).map(x => [x.type, x.value]));
       return fmt.replace('yyyy', p.year).replace('MM', p.month).replace('dd', p.day).replace('HH', p.hour).replace('mm', p.minute);
@@ -84,5 +86,5 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   const codeIndex = header.indexOf('Shared code');
   const codeOf = row => rsvp.data[row - 1][codeIndex];
   const setSetting = (key, value) => { const s = book.sheets['Gift settings']; const r = s.data.findIndex(x => x[0] === key); s.data[r][1] = value; ctx.refreshCatalogueNow(); };
-  return {ctx, books, book, rsvp, couples, props, mail, post, codeOf, codeIndex, setSetting};
+  return {ctx, books, book, rsvp, couples, props, mail, notices, post, codeOf, codeIndex, setSetting};
 }

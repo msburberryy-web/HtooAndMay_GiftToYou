@@ -6,14 +6,19 @@ No ChatGPT Sites backend is used for orders. Guest codes, delivery details and s
 ## 1. Update Apps Script (do this first)
 
 1. Open the gift Apps Script project whose deployment URL is in `lib/api.ts`. Leave the separate RSVP form script untouched.
-2. Replace **all** of `Code.gs` with `setup/Code.gs` from this repo. Save.
-3. In the function menu choose **setupGiftStandalone** and press **Run**. Approve the Google permissions.
+2. **Project Settings (⚙) › Script properties › Add script property** — add these once (they are kept out of this public repo):
+   - `GIFT_SHEET_ID` — the ID of the Gift Manager spreadsheet (the long part of its URL between `/d/` and `/edit`)
+   - `RSVP_SHEET_ID` — the ID of the RSVP spreadsheet
+   - optional `NOTIFY_EMAIL` — where new-request notifications go (comma-separated). Without it they go to the Google account that owns the script.
+   Keep `GIFT_TOKEN` as it is.
+3. Replace **all** of `Code.gs` with `setup/Code.gs` from this repo. Save.
+4. In the function menu choose **setupGiftStandalone** and press **Run**. Approve the Google permissions.
    It adds the gift columns to RSVPs, the email/First-submitted columns (Q:T) and activity columns (U:Z) to Couples, and creates the **Catalogue** and **Gift settings** tabs in Gift Manager. It does not issue codes, send emails or open orders.
-4. **Deploy › Manage deployments ›** the existing web-app deployment **› ✏️ Edit › Version: New version › Deploy**.
+5. **Deploy › Manage deployments ›** the existing web-app deployment **› ✏️ Edit › Version: New version › Deploy**.
    Execute as: **Me**. Who has access: **Anyone**. This keeps the same `/exec` URL.
    (Choosing *New deployment* instead creates a new URL — then update `GIFT_API_URL` in `lib/api.ts`.)
-5. Run **checkGiftSetup**: every line should start with ✅ (it only reads, never changes anything).
-6. Check it: open the `/exec` URL in a private/incognito window (Google shows "unable to open the file" when several Google accounts are signed in). You should see `{"ok":true,"data":{"service":"htoo-may-gift","version":2}}`.
+6. Run **checkGiftSetup**: every line should start with ✅ (it only reads, never changes anything).
+7. Check it: open the `/exec` URL in a private/incognito window (Google shows "unable to open the file" when several Google accounts are signed in). You should see `{"ok":true,"data":{"service":"htoo-may-gift","version":2}}`.
 
 `GIFT_TOKEN` (Project Settings › Script properties) protects the organiser-only actions. Never put it in the website.
 
@@ -36,7 +41,9 @@ Local development: `npm install`, then `npm run dev`. `npm test` checks the Apps
 - **Activity (Couples U:Z)** — filled automatically, Japan time:
   `First visited at`, `Last visited at`, `Visits` (once per browser session), `Cart gift` (current cart item, blank if removed), `Cart updated at`, `Saved gifts` (the couple's hearted gift IDs, max 5).
   Filter these with `Status` to find couples who never visited, or have a gift in the cart but have not confirmed.
-- **Emails** — confirmation in English or Burmese with the submitted delivery details. A normal Gmail account sends about 100 emails/day. A failed email never cancels an order: run **retryGiftEmails** later. Rows marked *Sending — check sent mail* need a manual check of Sent mail before retrying, to avoid duplicates. Gmail cannot send true no-reply mail; Workspace accounts may set `GIFT_NO_REPLY = true`.
+- **New-request notifications** — every confirmation emails the organiser (`[Gift NEW]` or `[Gift CHANGED]`, with the previous gift/address when changed) and a link to the sheet.
+- **Privacy** — "My selection" shows email, phone, postcode, address and note partly hidden; the sheet keeps the full details. Guests re-enter delivery details when changing a gift. Both spreadsheets should stay shared only with the people who manage them (never "Anyone with the link"). `checkGiftSetup` warns about codes shorter than 12 characters, which could be guessed.
+- **Emails** — wedding-style confirmation in English or Burmese with the gift, delivery details and a **View my gift** button that opens the guest's order progress. Each guest email counts as one email, plus one for your notification. A normal Gmail account sends about 100 emails/day. A failed email never cancels an order: run **retryGiftEmails** later. Rows marked *Sending — check sent mail* need a manual check of Sent mail before retrying, to avoid duplicates. Gmail cannot send true no-reply mail; Workspace accounts may set `GIFT_NO_REPLY = true`.
 
 ## 4. Before printing QR cards — live test
 
