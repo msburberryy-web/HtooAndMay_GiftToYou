@@ -1,7 +1,7 @@
 // Google Apps Script web app (setup/Code.gs). Redeploy as a new version of the same deployment to keep this URL.
 export const GIFT_API_URL: string =
   import.meta.env.VITE_GIFT_API_URL ||
-  'https://script.google.com/macros/s/AKfycbzwfibWf4TQlgPRbcRHt6bOH3D07f_RTecpL1hayK0w-53zO5fGuJ0RReS73eWiAITo/exec';
+  'https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec';
 
 export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'busy' | 'forbidden' | 'service' | 'network';
 
