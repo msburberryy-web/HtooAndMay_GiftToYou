@@ -55,19 +55,21 @@ const GIFT_ROWS_TO_ISSUE = [];
 function doGet(){return output_({ok:true,data:{service:'htoo-may-gift',version:2}});}
 
 function doPost(e){
- let lock;
+ let lock,action='';
  try{
   let p;
   try{p=JSON.parse((e&&e.postData&&e.postData.contents)||'{}');}catch(_){throw fault_('Invalid request.',400,'invalid');}
   if(!p||typeof p!=='object')throw fault_('Invalid request.',400,'invalid');
-  const action=String(p.action||'');
+  action=String(p.action||'');
   if(action==='catalogue')return output_({ok:true,data:publicCatalogue_()});
   if(action==='lookup')return output_({ok:true,data:lookup_(normalizeCode_(p.code))});
   if(action==='submit'){lock=acquireLock_();return output_({ok:true,data:submit_(p)});}
   if(action==='health'||action==='state'||action==='status'){requireToken_(p);lock=acquireLock_();return output_({ok:true,data:admin_(action,p)});}
   throw fault_('Unknown action.',400,'invalid');
  }catch(error){
-  if(!error.status)console.error(error);
+  // Shows in Apps Script › Executions (open the doPost row) so failed requests can be diagnosed.
+  if(error.status)console.warn('doPost '+(action||'?')+' refused: '+error.status+' '+(error.reason||'')+' — '+error.message);
+  else console.error('doPost '+(action||'?')+' failed: '+(error.stack||error));
   return output_({ok:false,status:error.status||503,reason:error.reason||'service',error:error.status?error.message:'The sheet could not save this request. Please retry with the same code.'});
  }finally{if(lock&&lock.hasLock())lock.releaseLock();}
 }
@@ -339,6 +341,35 @@ function retryGiftEmails(){
   const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),19).getValues();
   rows.forEach((r,i)=>{if(r[3]&&r[6]&&/^Failed/.test(text_(r[16])))sendGiftConfirmation_(sheet,i+2,r,text_(r[18])==='my'?'my':'en');});
  }finally{lock.releaseLock();}
+}
+
+// Run from the editor to check the whole setup. Read-only: it changes nothing and sends nothing.
+function checkGiftSetup(){
+ let problems=0;
+ const step=(name,fn)=>{try{const note=fn();console.log('✅ '+name+(note?' — '+note:''));}catch(e){problems++;console.log('❌ '+name+' — '+(e.message||e));}};
+ step('RSVP sheet',()=>{
+  const sh=SpreadsheetApp.openById(RSVP_SHEET_ID).getSheetByName(RSVP_TAB);if(!sh)throw new Error('No "'+RSVP_TAB+'" tab in the RSVP spreadsheet.');
+  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
+  const missing=['Name','Attending'].filter(h=>headers.indexOf(h)<0).concat(codeColumn_(headers)<0?['Gift code']:[]);
+  if(missing.length)throw new Error('Missing columns: '+missing.join(', '));
+  return rsvpRegistry_().size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
+ });
+ step('Couples tab (Gift Manager)',()=>{const sheet=couplesSheet_();return Math.max(0,sheet.getLastRow()-1)+' row(s)';});
+ step('Gift settings tab',()=>{
+  if(!giftBook_().getSheetByName(SETTINGS_TAB))throw new Error('Tab "'+SETTINGS_TAB+'" not found. Run setupGiftStandalone.');
+  const s=readSettings_();
+  return 'Open='+s.open+', Deadline='+(s.deadline||'(empty → "to be announced")')+(deadlinePassed_(s.deadline)?' (PASSED — guests cannot confirm)':'');
+ });
+ step('Catalogue tab',()=>{
+  const gifts=readCatalogue_(),enabled=gifts.filter(g=>g.enabled);
+  if(!enabled.length)throw new Error('No enabled gifts. Tick Enabled for at least one row.');
+  const noImage=enabled.filter(g=>!g.image).map(g=>g.id);
+  return gifts.length+' gift(s), '+enabled.length+' enabled'+(noImage.length?'; missing Image: '+noImage.join(', '):'');
+ });
+ step('Website catalogue response',()=>{refreshCatalogueNow();const json=JSON.stringify(publicCatalogue_());return json.length+' characters, OK';});
+ step('Organiser token',()=>{if(!PropertiesService.getScriptProperties().getProperty('GIFT_TOKEN'))throw new Error('GIFT_TOKEN missing. Run setupGiftStandalone.');return 'present';});
+ step('Email quota',()=>MailApp.getRemainingDailyQuota()+' email(s) left today');
+ console.log(problems?problems+' problem(s) found — fix the ❌ lines above.':'All checks passed. If the website still shows an error, note the "Ref:" under the message and check Executions › doPost.');
 }
 
 /* ───────────── Email ───────────── */
