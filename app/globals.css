@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Manrope:wght@400;500;600&family=Newsreader:opsz,wght@6..72,300;6..72,400;6..72,500&family=Noto+Serif+Myanmar:wght@400;500;600&family=Zen+Kaku+Gothic+New:wght@400;500&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
@@ -104,7 +103,7 @@
 
 /* Invitation theme: sampled from the current Htoo & May invitation. */
 :root{--background:#f4ead8;--foreground:#3f362e;--card:#fbf5e9;--card-foreground:#3f362e;--popover:#fbf5e9;--popover-foreground:#3f362e;--primary:#7c3241;--primary-foreground:#fbf5e9;--secondary:#e5e7d8;--secondary-foreground:#3f362e;--muted:#ede3d0;--muted-foreground:#62594f;--accent:#e5e7d8;--accent-foreground:#3f362e;--border:#b4935d;--input:#b4935d;--ring:#727b57}
-body{font-family:'Zen Kaku Gothic New',Arial,sans-serif;color:#3f362e;background:#f4ead8}
+body{font-family:Arial,sans-serif;color:#3f362e;background:#f4ead8}
 .site-shell{max-width:1440px;padding:0 48px}.masthead{border-color:#b4935d}.wordmark{font-family:'Newsreader',Georgia,serif;color:#7c3241;letter-spacing:0}
 .invitation-mark{width:88px;height:88px;padding:7px 16px;background:#727b57;border:1px solid #b4935d;outline:1px solid #fbf5e9;outline-offset:-4px;margin:0 auto 10px}.invitation-mark img{width:100%;height:100%;object-fit:contain}
 .intro{padding:18px 0 22px}.intro h1{font-family:'Newsreader',Georgia,serif;font-size:64px;letter-spacing:-1px;color:#7c3241}.intro>p:last-child{font-size:18px}.date{color:#727b57;font-size:14px;letter-spacing:2px}
@@ -161,7 +160,7 @@ body{color:#3f362e;background:#f4ead8;color-scheme:light}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}.gift,.media,.media img,.login-card{transition:none!important;animation:none!important}.gift:hover,.media:hover img,.media:focus-visible img{transform:none}}
 .gift-actions{flex-wrap:wrap}.gift-actions .primary{max-width:100%;white-space:normal}.gift-dialog input,.login-card input{caret-color:#7c3241}
 /* The invitation's serif voice, paired with quiet, readable interface typography. */
-body{font-family:'Manrope','Zen Kaku Gothic New',Arial,sans-serif}
+body{font-family:'Manrope',Arial,sans-serif}
 .wordmark,.intro h1,.login-card h1,.dialog-heading,.closing h2,.saved-order-heading h2{font-family:'Cormorant Garamond','Newsreader',Georgia,serif!important;font-weight:400!important}
 .wordmark{font-size:38px;letter-spacing:-1px}.intro h1{font-size:clamp(56px,8vw,94px);letter-spacing:-2px}.login-card h1{font-size:46px;line-height:1.1}.gift-caption p{font-family:'Newsreader',Georgia,serif}.gift-caption h2{font-family:'Manrope',Arial,sans-serif;font-size:14px;font-weight:500}
 .masthead .language-toggle{display:flex;align-items:center;gap:9px;min-height:44px;padding:4px 0;color:#7c3241;border:0;background:transparent;white-space:nowrap;font-family:'Manrope','Noto Serif Myanmar',sans-serif;font-size:14px}
@@ -211,3 +210,32 @@ body{font-family:'Manrope','Zen Kaku Gothic New',Arial,sans-serif}
 .success-badge{display:flex;align-items:center;gap:8px;color:#5d6b3f;font-size:17px;font-weight:500}
 @media(prefers-reduced-motion:reduce){.heart,.heart[aria-pressed=true],.opening-dots span,.delivery-scene *{animation:none!important;transition:none!important}}
 .order-id{font-size:14px;color:#62594f;letter-spacing:.3px}.order-id strong{color:#7c3241;letter-spacing:1px}
+
+/* Language switch label: system Burmese font, so the web font is only fetched in Burmese mode */
+.language-toggle [lang=my]{font-family:'Myanmar Text','Myanmar Sangam MN','Noto Sans Myanmar',Padauk,sans-serif}
+.guest-welcome.opening{min-height:150px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+
+/* Friendly form messages */
+.field-error{margin:2px 0 0;color:#922139;font-size:13px!important;line-height:1.45}
+.gift-dialog input[aria-invalid=true],.gift-dialog textarea[aria-invalid=true]{border-color:#922139;background:#fdf4f2}
+.check-label [aria-invalid=true]{border-color:#922139}
+
+/* What happens next */
+.next-steps{width:100%;text-align:left;border:1px solid #e2d2c4;background:#fffdf8;padding:14px 18px}
+.next-steps h4{margin:0 0 8px;font-family:'Newsreader',Georgia,serif;font-weight:400;font-size:19px;color:#7c3241}
+.next-steps ol{margin:0;padding-left:20px;display:grid;gap:6px;font-size:14px;line-height:1.55;color:#3f362e}
+
+/* Toasts */
+.toast-region{position:fixed;left:0;right:0;top:16px;display:flex;justify-content:center;pointer-events:none;z-index:60}
+.toast{background:#3f362e;color:#fbf5e9;padding:10px 18px;border-radius:999px;font-size:14px;box-shadow:0 6px 18px rgba(63,54,46,.25);animation:toast-in .25s ease-out}
+@keyframes toast-in{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
+
+/* Mobile bottom bar */
+.mobile-bar{display:none}
+@media(max-width:700px){
+ .mobile-bar{display:flex;gap:10px;position:fixed;left:0;right:0;bottom:0;z-index:40;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:rgba(251,245,233,.97);border-top:1px solid #b4935d;box-shadow:0 -4px 14px rgba(63,54,46,.08)}
+ .mobile-bar-saved{flex:0 0 auto;min-width:64px;min-height:44px;border:1px solid #7c3241;border-radius:4px;background:transparent;color:#7c3241;font-size:16px}
+ .mobile-bar-cart{flex:1}
+ .site-shell{padding-bottom:76px}
+}
+@media(prefers-reduced-motion:reduce){.toast{animation:none}}
