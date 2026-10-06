@@ -6,8 +6,8 @@
  * Guest actions (no token): catalogue, lookup, submit, track (visits & cart), save (up to 5 saved gifts). A guest can only see or change the record of the code they hold.
  * Organiser actions (GIFT_TOKEN required, never put the token in the website): health, state, status.
  */
-const GIFT_SHEET_ID = '1r9ngeMlOthZEMOjPIqVODOOtd2RxbtFa0ljARPOyiTQ';
-const RSVP_SHEET_ID = '11SA4KyupcO7ElvLnXRSngOxbMIb6G035OtWJqGE_tdM';
+// Spreadsheet IDs live in Project Settings › Script properties (GIFT_SHEET_ID, RSVP_SHEET_ID), not in this public file.
+// Optional: NOTIFY_EMAIL (comma-separated) to send new-request notifications somewhere other than the script owner.
 const RSVP_TAB = 'RSVPs';
 const COUPLES_TAB = 'Couples';
 const CATALOGUE_TAB = 'Catalogue';
@@ -132,7 +132,7 @@ function refreshCatalogueNow(){CacheService.getScriptCache().removeAll(['catalog
 function lookup_(code){
  const entry=registryEntry_(code);
  const found=findCoupleRow_(couplesSheet_(),code);
- return {label:entry.label,selection:found&&found.value[3]?selection_(found.value):null,saved:found?savedIds_(found.value[25]):[]};
+ return {label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[]};
 }
 
 // Records a visit or a cart change. The website calls this in the background; guests never wait for it.
@@ -199,6 +199,7 @@ function submit_(p){
  const updated=sheet.getRange(found.row,1,1,16).getValues()[0];
  const language=p.language==='my'?'my':'en';
  const emailStatus=sendGiftConfirmation_(sheet,found.row,updated,language);
+ notifyOrganiser_(updated,row[3]?{gift:text_(row[4]),address:text_(row[9])}:null,emailStatus);
  return {saved:true,giftId:gift.id,gift_name:text_(updated[4]),status:'Requested',emailStatus,first_submitted_at:firstSubmitted};
 }
 
@@ -217,7 +218,7 @@ function validateDelivery_(data){
 function admin_(action,p){
  const sheet=couplesSheet_();ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);
  const registry=rsvpRegistry_();
- if(action==='health')return {sheetId:GIFT_SHEET_ID,couples:registry.size};
+ if(action==='health')return {sheetId:giftSheetId_(),couples:registry.size};
  syncRsvp_(sheet,registry);
  const rows=sheet.getRange(2,1,Math.max(1,sheet.getLastRow()-1),20).getValues().map((value,i)=>({row:i+2,value})).filter(r=>registry.has(text_(r.value[0]).toUpperCase()));
  if(action==='state')return {invitations:rows.map(r=>invite_(r.value)),selections:rows.filter(r=>r.value[3]).map(r=>selection_(r.value))};
@@ -230,7 +231,15 @@ function admin_(action,p){
 
 /* ───────────── Sheets ───────────── */
 
-function giftBook_(){return SpreadsheetApp.openById(GIFT_SHEET_ID);}
+function giftBook_(){return SpreadsheetApp.openById(giftSheetId_());}
+function rsvpBook_(){return SpreadsheetApp.openById(rsvpSheetId_());}
+function giftSheetId_(){return sheetIdProperty_('GIFT_SHEET_ID');}
+function rsvpSheetId_(){return sheetIdProperty_('RSVP_SHEET_ID');}
+function sheetIdProperty_(name){
+ const id=text_(PropertiesService.getScriptProperties().getProperty(name));
+ if(!id)throw fault_('Script property '+name+' is not set (Project Settings › Script properties).',503,'service');
+ return id;
+}
 function couplesSheet_(){
  const sheet=giftBook_().getSheetByName(COUPLES_TAB);
  if(!sheet||sheet.getRange(1,1,1,16).getValues()[0].map(text_).join('|')!==GIFT_HEADERS.join('|'))throw fault_('The organiser sheet needs its original column headers.',503,'service');
@@ -276,7 +285,7 @@ function registryEntry_(code){
 // Source of truth: a code in the private RSVP sheet, never a public JS list.
 // Rows with problems are skipped (and logged) so one typo cannot take the site down for every guest.
 function rsvpRegistry_(){
- const sh=SpreadsheetApp.openById(RSVP_SHEET_ID).getSheetByName(RSVP_TAB);
+ const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw fault_('RSVPs tab not found.',503,'service');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
  const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)');
@@ -301,7 +310,7 @@ function rsvpRegistry_(){
  return result;
 }
 function ensureRsvpColumns_(){
- const sh=SpreadsheetApp.openById(RSVP_SHEET_ID).getSheetByName(RSVP_TAB);
+ const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw new Error('RSVPs tab not found.');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
  ['Gift code','Gift display name','Gift QR link','Gift enabled'].forEach(name=>{
@@ -418,11 +427,13 @@ function checkGiftSetup(){
  let problems=0;
  const step=(name,fn)=>{try{const note=fn();console.log('✅ '+name+(note?' — '+note:''));}catch(e){problems++;console.log('❌ '+name+' — '+(e.message||e));}};
  step('RSVP sheet',()=>{
-  const sh=SpreadsheetApp.openById(RSVP_SHEET_ID).getSheetByName(RSVP_TAB);if(!sh)throw new Error('No "'+RSVP_TAB+'" tab in the RSVP spreadsheet.');
+  const sh=rsvpBook_().getSheetByName(RSVP_TAB);if(!sh)throw new Error('No "'+RSVP_TAB+'" tab in the RSVP spreadsheet.');
   const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
   const missing=['Name','Attending'].filter(h=>headers.indexOf(h)<0).concat(codeColumn_(headers)<0?['Gift code']:[]);
   if(missing.length)throw new Error('Missing columns: '+missing.join(', '));
-  return rsvpRegistry_().size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
+  const registry=rsvpRegistry_(),short=Array.from(registry.keys()).filter(c=>c.length<12);
+  if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than 12 characters and could be guessed. Issue new codes for those rows with issueGiftCodesForConfiguredRows (clear the old code first).');
+  return registry.size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
  });
  step('Couples tab (Gift Manager)',()=>{
   const sheet=couplesSheet_();
@@ -442,6 +453,8 @@ function checkGiftSetup(){
   return gifts.length+' gift(s), '+enabled.length+' enabled'+(noImage.length?'; missing Image: '+noImage.join(', '):'');
  });
  step('Website catalogue response',()=>{refreshCatalogueNow();const json=JSON.stringify(publicCatalogue_());return json.length+' characters, OK';});
+ step('Script properties',()=>{giftSheetId_();rsvpSheetId_();return 'GIFT_SHEET_ID and RSVP_SHEET_ID set';});
+ step('Notification recipient',()=>organiserEmails_().join(', '));
  step('Organiser token',()=>{if(!PropertiesService.getScriptProperties().getProperty('GIFT_TOKEN'))throw new Error('GIFT_TOKEN missing. Run setupGiftStandalone.');return 'present';});
  step('Email quota',()=>MailApp.getRemainingDailyQuota()+' email(s) left today');
  console.log(problems?problems+' problem(s) found — fix the ❌ lines above.':'All checks passed. If the website still shows an error, note the "Ref:" under the message and check Executions › doPost.');
@@ -449,10 +462,42 @@ function checkGiftSetup(){
 
 /* ───────────── Email ───────────── */
 
-function confirmationFields_(r,language){
- const labels=language==='my'?['ဧည့်သည်အမည်','လက်ဆောင်ကုဒ်','ရွေးထားသောလက်ဆောင်','အရေအတွက်','လက်ခံမည့်သူ','အီးမေးလ်','ဖုန်းနံပါတ်','စာပို့သင်္ကေတ','လိပ်စာ','ပို့ဆောင်ရန် မှတ်ချက်','အတည်ပြုချိန်','ပို့ဆောင်ရန်အချက်အလက်များ အသုံးပြုခြင်းကို သဘောတူမှု']:['Registered guest(s)','Shared gift code','Selected gift','Quantity','Recipient','Email','Phone','Postcode','Delivery address','Delivery note','Confirmed at','Consent to use delivery details'];
- const values=[invite_(r).label,text_(r[0]),text_(r[4]),'1',text_(r[5]),text_(r[6]),text_(r[7]),text_(r[8]),text_(r[9]),text_(r[10])||'—',japanTime_(text_(r[14])),language==='my'?'သဘောတူပါသည်':'Agreed'];
- return labels.map((label,i)=>[label,values[i]]);
+// Guest confirmation email, in the wedding style. Only uses inline styles and tables so it renders in Gmail, Apple Mail and Outlook.
+const MAIL={burgundy:'#7c3241',cream:'#fbf5e9',paper:'#f3ebdd',gold:'#b4935d',ink:'#3f362e',muted:'#746965'};
+function guestEmail_(r,language){
+ const my=language==='my',code=text_(r[0]);
+ const t=my?{
+  title:'လက်ဆောင်ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ',hello:'ချစ်လှစွာသော '+invite_(r).label+'၊',
+  intro:'ကျွန်တော်တို့ရဲ့ မင်္ဂလာနေ့ကို လာရောက်ချီးမြှင့်ပေးလို့ ကျေးဇူးအများကြီးတင်ပါတယ်။ သင်ရွေးထားတဲ့ လက်ဆောင်ကို လက်ခံရရှိပါပြီ။ ပွဲပြီးတဲ့နောက် ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။',
+  gift:'ရွေးထားသောလက်ဆောင်',deliver:'ပို့ဆောင်ရမည့်နေရာ',recipient:'လက်ခံမည့်သူ',phone:'ဖုန်းနံပါတ်',address:'လိပ်စာ',note:'မှတ်ချက်',when:'အတည်ပြုချိန်',code:'လက်ဆောင်ကုဒ်',
+  button:'ကျွန်ုပ်၏လက်ဆောင်ကို ကြည့်ရန်',change:'ပထမဆုံး အတည်ပြုပြီး ၄၈ နာရီအတွင်း၊ ဆိုင်မှာ မမှာယူရသေးလျှင် လက်ဆောင်ကို ပြောင်းလဲနိုင်ပါတယ်။',
+  footer:'ဤအီးမေးလ်ကို အလိုအလျောက် ပို့ပေးထားပါသည်။ ပြန်မဖြေပါနှင့်။ မေးမြန်းလိုပါက Htoo သို့မဟုတ် May ကို တိုက်ရိုက် ဆက်သွယ်ပေးပါ။',love:'ချစ်ခြင်းမေတ္တာဖြင့်၊ Htoo & May'
+ }:{
+  title:'Your gift request is confirmed',hello:'Dear '+invite_(r).label+',',
+  intro:'Thank you for celebrating with us. We have received your gift choice, and we will arrange delivery after the celebration. No payment is required.',
+  gift:'Your gift',deliver:'Delivering to',recipient:'Recipient',phone:'Phone',address:'Address',note:'Note',when:'Confirmed',code:'Gift code',
+  button:'View my gift',change:'You can change your choice within 48 hours of your first confirmation, until it is ordered.',
+  footer:'This is an automated confirmation. Please do not reply to this email. For help, contact Htoo or May directly.',love:'With love, Htoo & May'
+ };
+ const link=GIFT_ORIGIN+'/#code='+encodeURIComponent(code)+'&view=order';
+ const font=my?"'Noto Sans Myanmar','Myanmar Text',Padauk,Arial,sans-serif":'Georgia,\'Times New Roman\',serif';
+ const body=my?"'Noto Sans Myanmar','Myanmar Text',Padauk,Arial,sans-serif":'Arial,Helvetica,sans-serif';
+ const e=escapeHtml_,rows=[[t.recipient,text_(r[5])],[t.phone,text_(r[7])],[t.address,'〒'+text_(r[8])+'\n'+text_(r[9])]].concat(text_(r[10])?[[t.note,text_(r[10])]]:[]);
+ const detail=rows.map(([k,v])=>'<tr><td style="padding:6px 0;width:34%;vertical-align:top;color:'+MAIL.muted+';font-size:13px">'+e(k)+'</td><td style="padding:6px 0;vertical-align:top;color:'+MAIL.ink+';font-size:15px;white-space:pre-wrap">'+e(v)+'</td></tr>').join('');
+ const html='<div style="margin:0;padding:24px 12px;background:'+MAIL.paper+'"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:'+MAIL.cream+';border:1px solid '+MAIL.gold+';border-collapse:separate">'
+  +'<tr><td style="padding:36px 32px 8px;text-align:center"><img src="'+GIFT_ORIGIN+'/branding/monogram.png" width="88" height="88" alt="Htoo &amp; May" style="display:block;margin:0 auto 12px;border:0"><div style="font-family:Georgia,serif;font-size:13px;letter-spacing:3px;color:'+MAIL.gold+'">16 · 10 · 2026</div>'
+  +'<h1 style="margin:14px 0 6px;font-family:'+font+';font-weight:normal;font-size:28px;line-height:1.35;color:'+MAIL.burgundy+'">'+e(t.title)+'</h1><div style="width:60px;height:1px;background:'+MAIL.gold+';margin:16px auto"></div></td></tr>'
+  +'<tr><td style="padding:0 32px;font-family:'+body+';font-size:15px;line-height:1.75;color:'+MAIL.ink+'"><p style="margin:0 0 10px">'+e(t.hello)+'</p><p style="margin:0 0 22px">'+e(t.intro)+'</p></td></tr>'
+  +'<tr><td style="padding:0 32px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#fffdf8;border:1px solid #e2d2c4"><tr><td style="padding:18px 20px;font-family:'+body+'">'
+  +'<div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:'+MAIL.gold+'">'+e(t.gift)+'</div><div style="margin-top:6px;font-family:Georgia,serif;font-size:21px;color:'+MAIL.burgundy+'">'+e(text_(r[4]))+'</div><div style="margin-top:2px;font-size:13px;color:'+MAIL.muted+'">× 1</div></td></tr></table></td></tr>'
+  +'<tr><td style="padding:22px 32px 0;font-family:'+body+'"><div style="font-size:12px;letter-spacing:2px;text-transform:uppercase;color:'+MAIL.gold+';margin-bottom:6px">'+e(t.deliver)+'</div><table role="presentation" width="100%" cellpadding="0" cellspacing="0">'+detail
+  +'<tr><td style="padding:6px 0;color:'+MAIL.muted+';font-size:13px">'+e(t.when)+'</td><td style="padding:6px 0;color:'+MAIL.ink+';font-size:15px">'+e(japanTime_(text_(r[14])))+'</td></tr><tr><td style="padding:6px 0;color:'+MAIL.muted+';font-size:13px">'+e(t.code)+'</td><td style="padding:6px 0;color:'+MAIL.ink+';font-size:15px;letter-spacing:1px">'+e(maskCode_(code))+'</td></tr></table></td></tr>'
+  +'<tr><td style="padding:28px 32px 8px;text-align:center"><a href="'+e(link)+'" style="display:inline-block;background:'+MAIL.burgundy+';color:'+MAIL.cream+';text-decoration:none;font-family:'+body+';font-size:16px;padding:14px 34px;border-radius:4px">'+e(t.button)+'</a>'
+  +'<p style="margin:14px 0 0;font-family:'+body+';font-size:13px;line-height:1.6;color:'+MAIL.muted+'">'+e(t.change)+'</p></td></tr>'
+  +'<tr><td style="padding:26px 32px 32px;text-align:center;font-family:'+body+'"><div style="width:60px;height:1px;background:'+MAIL.gold+';margin:0 auto 18px"></div><div style="font-family:'+font+';font-size:18px;color:'+MAIL.burgundy+'">'+e(t.love)+'</div><p style="margin:14px 0 0;font-size:12px;line-height:1.6;color:'+MAIL.muted+'">'+e(t.footer)+'</p></td></tr></table></div>';
+ const text=[t.title,'',t.hello,t.intro,'',t.gift+': '+text_(r[4])+' × 1',t.recipient+': '+text_(r[5]),t.phone+': '+text_(r[7]),t.address+': 〒'+text_(r[8])+' '+text_(r[9])]
+  .concat(text_(r[10])?[t.note+': '+text_(r[10])]:[]).concat([t.when+': '+japanTime_(text_(r[14])),t.code+': '+maskCode_(code),'',t.button+': '+link,t.change,'',t.love,t.footer]).join('\n');
+ return {subject:'Htoo & May — '+t.title,html,text};
 }
 function sendGiftConfirmation_(sheet,row,r,language){
  ensureEmailColumns_(sheet);
@@ -461,17 +506,13 @@ function sendGiftConfirmation_(sheet,row,r,language){
  if(state[1]===fingerprint&&/^Sent/.test(text_(state[0])))return 'sent';
  // A send can succeed before the sent-marker write. Avoid sending again if that state is ambiguous.
  if(state[1]===fingerprint&&text_(state[0])==='Sending — check sent mail')return 'pending';
- const fields=confirmationFields_(r,language);
- const title=language==='my'?'လက်ဆောင်ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ':'Your gift request is confirmed';
- const note=language==='my'?'ဤအီးမေးလ်ကို အလိုအလျောက် ပို့ပေးထားပါသည်။ ပြန်မဖြေပါနှင့်။ မေးမြန်းလိုပါက Htoo သို့မဟုတ် May ကို တိုက်ရိုက် ဆက်သွယ်ပေးပါ။':'This is an automated confirmation. Please do not reply to this email. For help, contact Htoo or May directly.';
- const intro=language==='my'?'ပွဲပြီးတဲ့နောက် လက်ဆောင်ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။':'Htoo & May will arrange delivery after the celebration. No payment is required.';
  let attempted=false;
  try{
   if(MailApp.getRemainingDailyQuota()<1)throw new Error('Daily email quota reached');
   sheet.getRange(row,17,1,3).setValues([['Sending — check sent mail',fingerprint,language]]);SpreadsheetApp.flush();
-  const html='<div style="font-family:Arial,sans-serif;line-height:1.8;color:#6b293d;max-width:620px"><h1>Htoo &amp; May</h1><h2>'+escapeHtml_(title)+'</h2><p>'+escapeHtml_(intro)+'</p><table style="width:100%;border-collapse:collapse">'+fields.map(([k,v])=>'<tr><th style="text-align:left;vertical-align:top;padding:8px;border-bottom:1px solid #ddd">'+escapeHtml_(k)+'</th><td style="padding:8px;border-bottom:1px solid #ddd;white-space:pre-wrap">'+escapeHtml_(v)+'</td></tr>').join('')+'</table><p><strong>'+escapeHtml_(note)+'</strong></p></div>';
+  const mail=guestEmail_(r,language);
   attempted=true;
-  MailApp.sendEmail({to:text_(r[6]),subject:'Htoo & May — '+title,body:title+'\n\n'+intro+'\n\n'+fields.map(([k,v])=>k+': '+v).join('\n')+'\n\n'+note,htmlBody:html,name:'Htoo & May · Gift confirmation',noReply:GIFT_NO_REPLY});
+  MailApp.sendEmail({to:text_(r[6]),subject:mail.subject,body:mail.text,htmlBody:mail.html,name:'Htoo & May',noReply:GIFT_NO_REPLY});
   sheet.getRange(row,17,1,3).setValues([['Sent '+new Date().toISOString(),fingerprint,language]]);SpreadsheetApp.flush();return 'sent';
  }catch(error){
   // After a send attempt, the result may be ambiguous. Manual sent-mail check prevents duplicate messages.
@@ -479,6 +520,29 @@ function sendGiftConfirmation_(sheet,row,r,language){
   try{sheet.getRange(row,17,1,3).setValues([[status,fingerprint,language]]);SpreadsheetApp.flush();}catch(ignore){}
   return attempted?'pending':'failed';
  }
+}
+
+// Tells the organiser about every confirmed request (NEW, or CHANGED within the 48-hour window). Never blocks the guest.
+function organiserEmails_(){
+ const custom=text_(PropertiesService.getScriptProperties().getProperty('NOTIFY_EMAIL'));
+ const list=(custom?custom.split(','):[Session.getEffectiveUser().getEmail()]).map(x=>x.trim()).filter(Boolean);
+ if(!list.length)throw new Error('No notification address: set NOTIFY_EMAIL in Script properties.');
+ return list;
+}
+function notifyOrganiser_(r,previous,guestEmailStatus){
+ try{
+  const kind=previous?'CHANGED':'NEW',label=invite_(r).label;
+  const lines=[['Couple',label],['Gift',text_(r[4])]].concat(previous&&previous.gift!==text_(r[4])?[['Previous gift',previous.gift]]:[])
+   .concat([['Recipient',text_(r[5])],['Email',text_(r[6])],['Phone',text_(r[7])],['Postcode',text_(r[8])],['Address',text_(r[9])]])
+   .concat(previous&&previous.address!==text_(r[9])?[['Previous address',previous.address]]:[])
+   .concat([['Note',text_(r[10])||'—'],['Confirmed at',japanTime_(text_(r[14]))],['Guest email',guestEmailStatus],['Code',text_(r[0])]]);
+  const sheetUrl='https://docs.google.com/spreadsheets/d/'+giftSheetId_()+'/edit';
+  const e=escapeHtml_;
+  const html='<div style="font-family:Arial,sans-serif;color:'+MAIL.ink+';max-width:600px"><p style="margin:0 0 4px;font-size:12px;letter-spacing:2px;color:'+MAIL.gold+'">GIFT REQUEST · '+kind+'</p><h2 style="margin:0 0 14px;font-family:Georgia,serif;font-weight:normal;color:'+MAIL.burgundy+'">'+e(label)+'</h2><table cellpadding="0" cellspacing="0" style="border-collapse:collapse;width:100%">'
+   +lines.map(([k,v])=>'<tr><td style="padding:6px 12px 6px 0;color:'+MAIL.muted+';font-size:13px;vertical-align:top;width:30%;border-bottom:1px solid #eee">'+e(k)+'</td><td style="padding:6px 0;font-size:14px;white-space:pre-wrap;border-bottom:1px solid #eee">'+e(v)+'</td></tr>').join('')
+   +'</table><p style="margin:18px 0 0"><a href="'+sheetUrl+'" style="color:'+MAIL.burgundy+'">Open the Gift Manager sheet</a></p></div>';
+  MailApp.sendEmail({to:organiserEmails_().join(','),subject:'[Gift '+kind+'] '+label+' — '+text_(r[4]),body:lines.map(([k,v])=>k+': '+v).join('\n')+'\n\n'+sheetUrl,htmlBody:html,name:'Htoo & May gift page'});
+ }catch(error){console.warn('Organiser notification not sent: '+(error.message||error));}
 }
 
 /* ───────────── Helpers ───────────── */
@@ -496,6 +560,12 @@ function japanNow_(){return Utilities.formatDate(new Date(),GIFT_TIME_ZONE,'yyyy
 function japanTime_(iso){const t=Date.parse(iso);return Number.isFinite(t)?Utilities.formatDate(new Date(t),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm')+' JST':iso;}
 function invite_(r){const members=[text_(r[1]),text_(r[2])].filter(Boolean);return {code:text_(r[0]),label:members.join(' & '),members,created_at:text_(r[13])};}
 function selection_(r){return {gift_id:text_(r[3]),gift_name:text_(r[4]),recipient:text_(r[5]),email:text_(r[6]),phone:text_(r[7]),postal:text_(r[8]),address:text_(r[9]),note:text_(r[10]),status:text_(r[11]),tracking:text_(r[12]),created_at:text_(r[13]),updated_at:text_(r[14]),first_submitted_at:text_(r[19]||r[14]||r[13])};}
+// What a code holder sees on "My selection": enough to recognise their order, not enough to misuse it.
+function maskSelection_(sel){return Object.assign({},sel,{email:maskEmail_(sel.email),phone:maskTail_(sel.phone,4),postal:sel.postal?sel.postal.slice(0,3)+'-••••':'',address:maskAddress_(sel.address),note:sel.note?'••••':'',masked:true});}
+function maskEmail_(v){const at=v.indexOf('@');return at>0?v[0]+'•••'+v.slice(at):'';}
+function maskTail_(v,keep){const digits=v.replace(/\D/g,'');return digits?'•••-'+digits.slice(-keep):'';}
+function maskAddress_(v){const chars=Array.from(v);if(!chars.length)return '';const keep=Math.min(12,Math.ceil(chars.length/3));return chars.slice(0,keep).join('')+' •••';}
+function maskCode_(code){return code.length>8?code.slice(0,4)+'…'+code.slice(-4):code;}
 function fault_(message,status,reason){const e=new Error(message);e.status=status;e.reason=reason;return e;}
 function output_(value){return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);}
 function escapeHtml_(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}

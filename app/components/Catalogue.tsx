@@ -7,7 +7,7 @@ import {Check,CheckCircle2,Heart,ShoppingBag} from 'lucide-react';
 import OrderStatus from './OrderStatus';
 import DeliveryScene from './DeliveryScene';
 import {ApiError,assetUrl,callGiftApi} from '@/lib/api';
-type Selection={gift_id:string;gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;first_submitted_at?:string};
+type Selection={masked?:boolean;gift_id:string;gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;first_submitted_at?:string};
 type Stage='detail'|'cart'|'delivery'|'review'|'success';
 const empty={recipient:'',email:'',phone:'',postal:'',address:'',note:''};
 // Short technical reference shown under service errors, to help the organiser diagnose problems.
@@ -16,14 +16,14 @@ const MAX_SAVED=5;
 const pickForm=(f:typeof empty)=>({recipient:f.recipient,email:f.email,phone:f.phone,postal:f.postal,address:f.address,note:f.note});
 export default function Catalogue(){
  const [lang,setLang]=useState<'en'|'my'>('en'),[config,setConfig]=useState<Config>(defaultConfig),[loaded,setLoaded]=useState(false),[loadError,setLoadError]=useState(''),[category,setCategory]=useState('All gifts');
- const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(false);
+ const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(false),[focusOrder,setFocusOrder]=useState(false);
  const saveSeq=useRef(0);
  const t=giftCopy[lang];
  const ended=!!config.deadline&&Date.now()>new Date(config.deadline+'T23:59:59+09:00').getTime();
  function resetGuest(){setVerified('');setLabel('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
  function guestError(e:unknown){if(!(e instanceof ApiError))return `${t.serviceError} (${errorRef('request',e)})`;switch(e.reason){case 'not_found':return t.invalidCode;case 'invalid':return t.invalidDetails;case 'locked':return t.cannotChange;case 'closed':return t.closed;case 'ended':return t.ended;case 'unavailable':return t.giftUnavailable;case 'limit':return t.saveLimit;default:return `${t.serviceError} (${errorRef('request',e)})`;}}
  function load(){setLoadError('');callGiftApi<Config>('catalogue').then(d=>{setConfig({...d,gifts:d.gifts.map(g=>({...g,image:assetUrl(g.image)}))});setLoaded(true)}).catch(e=>{console.error('Gift catalogue failed',e);setLoadError(errorRef('catalogue',e))});}
- async function lookup(value=code,showExisting=false){setError('');setBusy(true);const normalized=value.replace(/[\s-]/g,'').toUpperCase();try{const d=await callGiftApi<{label:string;selection:Selection|null;saved?:string[]}>('lookup',{code:normalized});setCode(normalized);setSaved(d.saved??[]);recordVisit(normalized);setVerified(normalized);setLabel(d.label);setSelection(d.selection);setEmailStatus('');setConsent(false);setForm(d.selection?pickForm(d.selection):empty);sessionStorage.setItem('gift-code',normalized);if(d.selection){if(showExisting){const g=config.gifts.find(g=>g.id===d.selection!.gift_id)??gifts.find(g=>g.id===d.selection!.gift_id);if(g){setCart(g);setStage('success');setPanel(true)}else setError(t.unavailableGift)}}else if(showExisting){setError(t.noSelection)}}catch(e){if(!verified){resetGuest();setCode(normalized);}setError(guestError(e))}finally{setBusy(false)}}
+ async function lookup(value=code,showExisting=false){setError('');setBusy(true);const normalized=value.replace(/[\s-]/g,'').toUpperCase();try{const d=await callGiftApi<{label:string;selection:Selection|null;saved?:string[]}>('lookup',{code:normalized});setCode(normalized);setSaved(d.saved??[]);recordVisit(normalized);setVerified(normalized);setLabel(d.label);setSelection(d.selection);setEmailStatus('');setConsent(false);setForm(empty);sessionStorage.setItem('gift-code',normalized);if(d.selection){if(showExisting){const g=config.gifts.find(g=>g.id===d.selection!.gift_id)??gifts.find(g=>g.id===d.selection!.gift_id);if(g){setCart(g);setStage('success');setPanel(true)}else setError(t.unavailableGift)}}else if(showExisting){setError(t.noSelection)}}catch(e){if(!verified){resetGuest();setCode(normalized);}setError(guestError(e))}finally{setBusy(false)}}
  const lookupRef=useRef(lookup);lookupRef.current=lookup;
  // Activity for the organiser's sheet (visits, cart). Sent in the background; failures are ignored.
  function track(payload:Record<string,unknown>){void callGiftApi('track',payload).catch(e=>console.warn('Activity not recorded',e))}
@@ -36,13 +36,15 @@ export default function Catalogue(){
   callGiftApi<{saved:string[]}>('save',{code:verified,saved:next}).then(d=>{if(seq===saveSeq.current)setSaved(d.saved)}).catch(e=>{if(seq===saveSeq.current){setSaved(previous);setSaveNote(guestError(e))}});
  }
  // A QR card opens …/#code=XXXX. Check it straight away, then remove it from the address bar.
- function cardCode(){const card=/^#code=([A-Za-z0-9]{6,40})$/.exec(window.location.hash);if(card)window.history.replaceState(null,'',window.location.pathname+window.location.search);return card?card[1]:null}
+ // The confirmation email links to …/#code=XXXX&view=order to open the guest's order progress directly.
+ function cardCode(){const card=/^#code=([A-Za-z0-9]{6,40})(&view=order)?$/.exec(window.location.hash);if(card){window.history.replaceState(null,'',window.location.pathname+window.location.search);if(card[2])setFocusOrder(true)}return card?card[1]:null}
  useEffect(()=>{load();const l=localStorage.getItem('gift-language');if(l==='my')setLang('my');const start=cardCode()??sessionStorage.getItem('gift-code');if(start){setCode(start.toUpperCase());setOpening(true);void lookupRef.current(start).finally(()=>setOpening(false))}
   const onHash=()=>{const c=cardCode();if(c){setCode(c.toUpperCase());setOpening(true);void lookupRef.current(c).finally(()=>setOpening(false))}};window.addEventListener('hashchange',onHash);return()=>window.removeEventListener('hashchange',onHash)},[]);
  function switchLang(l:'en'|'my'){setLang(l);localStorage.setItem('gift-language',l)}
  function openCart(){setDetail(null);setStage('cart');setPanel(true);setError('')}
  function add(gift:Gift|null=detail){if(!gift||locked)return;setCartGift(gift);openCart();setConsent(false)}
  async function submit(){if(!cart||!verified||!consent)return;setBusy(true);setError('');try{const d=await callGiftApi<{gift_name?:string;emailStatus?:string;first_submitted_at?:string}>('submit',{code:verified,consent,language:lang,data:{...pickForm(form),gift_id:cart.id}});setSelection({...pickForm(form),gift_id:cart.id,gift_name:d.gift_name,status:'Requested',tracking:'',first_submitted_at:d.first_submitted_at??selection?.first_submitted_at});setEmailStatus(d.emailStatus??'');setStage('success')}catch(e){setError(guestError(e))}finally{setBusy(false)}}
+ useEffect(()=>{if(focusOrder&&selection){document.getElementById('my-order')?.scrollIntoView({behavior:'smooth',block:'start'});setFocusOrder(false)}},[focusOrder,selection]);
  const [clock,setClock]=useState(Date.now());
  useEffect(()=>{const timer=setInterval(()=>setClock(Date.now()),30000);return()=>clearInterval(timer)},[]);
  const locked=!!selection&&(selection.status!=='Requested'||!selection.first_submitted_at||clock>=Date.parse(selection.first_submitted_at)+48*3600000);

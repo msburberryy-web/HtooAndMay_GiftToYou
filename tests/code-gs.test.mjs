@@ -235,3 +235,76 @@ test('submit still works after activity columns exist', () => {
   assert.equal(row[11], 'Requested');
   assert.equal(row[25], 'hario-mug');
 });
+
+test('My selection shows delivery details partly hidden', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, data: {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '150-0001', address: 'Tokyo-to Shibuya-ku Jingumae 1-2-3 Sakura Mansion 405', note: 'Leave with concierge'}});
+  const sel = s.post({action: 'lookup', code}).data.selection;
+  assert.equal(sel.email, 'a•••@example.com');
+  assert.equal(sel.phone, '•••-5678');
+  assert.equal(sel.postal, '150-••••');
+  assert.ok(sel.address.endsWith('•••') && !sel.address.includes('405'));
+  assert.equal(sel.note, '••••');
+  assert.equal(sel.masked, true);
+  assert.equal(sel.recipient, 'Aye Aye');
+  // the sheet keeps the full details
+  const row = s.couples.data.find(r => r[0] === code);
+  assert.equal(row[6], 'ayeaye@example.com');
+  // organiser 'state' (token) is not masked
+  const st = s.post({action: 'state', token: s.props.GIFT_TOKEN}).data.selections[0];
+  assert.equal(st.email, 'ayeaye@example.com');
+});
+
+test('organiser is notified of NEW and CHANGED requests', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  const d = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Tokyo 1-2-3 Room 4', note: ''};
+  s.post({action: 'submit', code, consent: true, data: d});
+  assert.equal(s.notices.length, 1);
+  assert.match(s.notices[0].subject, /^\[Gift NEW\] Aye Aye & Ko Ko — HARIO — Tea & coffee brewer mug$/);
+  assert.match(s.notices[0].body, /Recipient: Aye Aye/);
+  assert.match(s.notices[0].body, /docs\.google\.com\/spreadsheets\/d\//);
+  s.post({action: 'submit', code, consent: true, data: {...d, gift_id: 'hario-bowls'}});
+  assert.equal(s.notices.length, 2);
+  assert.match(s.notices[1].subject, /^\[Gift CHANGED\]/);
+  assert.match(s.notices[1].body, /Previous gift: HARIO — Tea & coffee brewer mug/);
+  s.props.NOTIFY_EMAIL = 'htoo@example.com, may@example.com';
+  s.post({action: 'submit', code, consent: true, data: {...d, gift_id: 'hario-mug'}});
+  assert.equal(s.mail.at(-1).to, 'htoo@example.com,may@example.com');
+});
+
+test('guest email: wedding style, monogram, View my gift link, masked code, escaped text', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  s.post({action: 'submit', code, consent: true, language: 'en', data: {gift_id: 'hario-mug', recipient: '<b>Aye</b>', email: 'ayeaye@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Tokyo 1-2-3 Room 4', note: ''}});
+  const m = s.mail[0];
+  assert.equal(m.subject, 'Htoo & May — Your gift request is confirmed');
+  assert.ok(m.htmlBody.includes('https://msburberryy-web.github.io/HtooAndMay_GiftToYou/branding/monogram.png'));
+  assert.ok(m.htmlBody.includes('https://msburberryy-web.github.io/HtooAndMay_GiftToYou/#code=' + code + '&amp;view=order'));
+  assert.ok(m.htmlBody.includes('View my gift'));
+  assert.ok(m.htmlBody.includes(code.slice(0, 4) + '…' + code.slice(-4)));
+  assert.ok(!m.htmlBody.includes('<b>Aye</b>') && m.htmlBody.includes('&lt;b&gt;Aye&lt;/b&gt;'));
+  assert.match(m.body, /View my gift: https:\/\/msburberryy-web\.github\.io\/HtooAndMay_GiftToYou\/#code=/);
+});
+
+test('sheet IDs come from Script properties; missing ones are reported', () => {
+  const s = setup();
+  delete s.props.GIFT_SHEET_ID;
+  const r = s.post({action: 'catalogue'});
+  s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'catalogue'}).ok, false);
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.checkGiftSetup();
+  assert.ok(lines.some(l => /❌ Script properties — Script property GIFT_SHEET_ID is not set/.test(l)), lines.join('\n'));
+});
+
+test('checkGiftSetup warns about short, guessable codes', () => {
+  const s = setup();
+  const h = s.rsvp.data[0];
+  const row = h.map(() => ''); row[h.indexOf('Name')] = 'Short'; row[h.indexOf('Attending')] = 'Yes'; row[s.codeIndex] = 'ABC123';
+  s.rsvp.data.push(row);
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.checkGiftSetup();
+  assert.ok(lines.some(l => l.startsWith('⚠️ 1 code(s) are shorter than 12')), lines.join('\n'));
+});
