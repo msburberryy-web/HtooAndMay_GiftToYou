@@ -239,3 +239,20 @@ body{font-family:'Manrope',Arial,sans-serif}
  .site-shell{padding-bottom:76px}
 }
 @media(prefers-reduced-motion:reduce){.toast{animation:none}}
+
+/* Checkout steps */
+.stepper{list-style:none;display:flex;margin:4px 0 6px;padding:0;counter-reset:none}
+.stepper li{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;position:relative;font-size:13px;color:#8a7f78;text-align:center}
+.stepper li:not(:first-child)::before{content:"";position:absolute;top:14px;right:50%;width:100%;height:2px;background:#e2d2c4;z-index:0}
+.stepper li.done:not(:first-child)::before,.stepper li.current:not(:first-child)::before{background:#7c3241}
+.stepper .dot{position:relative;z-index:1;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1.5px solid #cbb9b6;background:#fbf5e9;font-size:13px;font-weight:600}
+.stepper li.done .dot{background:#7c3241;border-color:#7c3241;color:#fbf5e9}
+.stepper li.current .dot{border-color:#7c3241;color:#7c3241;box-shadow:0 0 0 4px rgba(124,50,65,.12)}
+.stepper li.current{color:#7c3241;font-weight:600}
+
+/* My order page */
+.order-page{max-width:900px;margin:8px auto 40px}
+.back-link{margin:8px 0 4px}
+.change-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px dashed #b4935d;background:#fffdf8;padding:14px 18px;margin-top:8px}
+.change-box p{margin:0;font-size:14px;color:#3f362e;flex:1 1 260px}
+.welcome-order{margin:12px auto 4px;display:flex}
