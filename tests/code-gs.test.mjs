@@ -438,3 +438,30 @@ test('safeguard: setup upgrades an Order history tab created before "Superseded 
   assert.equal(hist[0][15], 'Superseded by');
   assert.equal(hist[1][15], 'HM-0002');
 });
+
+test('issueGiftCodesForAllGuests: codes for every named row, existing codes kept, short ones reported', () => {
+  const s = setup();
+  const h = s.rsvp.data[0];
+  const before2 = s.codeOf(2);
+  const add = (name, attending, code = '') => { const r = h.map(() => ''); r[h.indexOf('Name')] = name; r[h.indexOf('Attending')] = attending; r[s.codeIndex] = code; s.rsvp.data.push(r); return s.rsvp.data.length; };
+  const declined = add('Declined Guest', 'No');
+  const shortRow = add('Test', 'Yes', 'TEST01');
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.issueGiftCodesForAllGuests();
+  assert.equal(s.codeOf(2), before2, 'existing code kept');
+  assert.match(s.codeOf(4), /^[A-F0-9]{20}$/, 'row 4 (declined, named) gets a code');
+  assert.match(s.codeOf(declined), /^[A-F0-9]{20}$/);
+  assert.equal(s.codeOf(5), '', 'row without any name gets nothing');
+  assert.equal(s.codeOf(shortRow), 'TEST01');
+  assert.equal(s.rsvp.data[declined - 1][h.indexOf('Gift QR link')], 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou/#code=' + s.codeOf(declined));
+  assert.ok(lines.some(l => /^Issued 2 new gift code/.test(l)), lines.join('\n'));
+  assert.ok(lines.some(l => l.includes('row(s) ' + shortRow + ' have a short code')));
+  // declined guests cannot log in, attending ones can
+  assert.equal(s.post({action: 'lookup', code: s.codeOf(declined)}).reason, 'not_found');
+  const codes = new Set(s.rsvp.data.slice(1).map(r => r[s.codeIndex]).filter(Boolean));
+  assert.equal(codes.size, s.rsvp.data.slice(1).filter(r => r[s.codeIndex]).length, 'all codes unique');
+  // running again changes nothing
+  const snapshot = JSON.stringify(s.rsvp.data);
+  s.ctx.issueGiftCodesForAllGuests();
+  assert.equal(JSON.stringify(s.rsvp.data), snapshot);
+});
