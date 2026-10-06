@@ -37,9 +37,20 @@ export async function callGiftApi<T>(action: string, payload: Record<string, unk
   return body.data as T;
 }
 
-// Catalogue images may be full HTTPS URLs or file names stored in public/products/.
-export function assetUrl(path: string): string {
-  if (!path || /^(https?:)?\/\//.test(path) || path.startsWith('data:')) return path;
+// Catalogue "Image" values: a full HTTPS URL, or a product photo name (e.g. "hario-mug.jpg" or "hario-mug")
+// that scripts/optimize-images.mjs turned into public/products/hario-mug-400.webp and -800.webp.
+export function giftImage(path: string): {image: string; srcSet?: string} {
+  if (!path || /^(https?:)?\/\//.test(path) || path.startsWith('data:')) return {image: path};
   const clean = path.replace(/^\/+/, '');
-  return import.meta.env.BASE_URL + (clean.includes('/') ? clean : 'products/' + clean);
+  if (clean.includes('/')) return {image: import.meta.env.BASE_URL + clean};
+  const name = clean.replace(/\.[a-z0-9]+$/i, '').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  const at = (w: number) => `${import.meta.env.BASE_URL}products/${name}-${w}.webp`;
+  return {image: at(800), srcSet: `${at(400)} 400w, ${at(800)} 800w`};
+}
+// If a photo is missing, show the monogram instead of a broken image.
+export function imageFallback(e: {currentTarget: HTMLImageElement}) {
+  const img = e.currentTarget, fallback = import.meta.env.BASE_URL + 'branding/monogram.png';
+  if (img.src.endsWith(fallback)) return;
+  img.removeAttribute('srcset');
+  img.src = fallback;
 }

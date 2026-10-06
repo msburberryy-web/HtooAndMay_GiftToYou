@@ -1,4 +1,4 @@
-export type Gift={id:string;brand:string;name:string;category:string;description:string;details:string;image:string;source:string;price:number;enabled:boolean};
+export type Gift={id:string;brand:string;name:string;category:string;description:string;details:string;image:string;srcSet?:string;source:string;price:number;enabled:boolean};
 export const gifts:Gift[]=[
 {id:'kinto',brand:'KINTO',name:'Travel tumbler · 500ml',category:'Everyday',description:'A little companion for wherever the day takes you.',details:'An insulated stainless steel travel tumbler. The pictured colour is white.',image:'https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/kinto.jpg',source:'https://kinto.co.jp/products/20941',price:3520,enabled:false},
 {id:'iittala',brand:'iittala',name:'Aino Aalto · two glasses',category:'For the table',description:'Two glasses, for everyday moments worth sharing.',details:'A pair of 220ml Aino Aalto tumblers in clear glass.',image:'https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/iittala.jpg',source:'https://www.iittala.jp/products/detail/349',price:4400,enabled:false},
