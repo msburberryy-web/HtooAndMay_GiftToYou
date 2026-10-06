@@ -3,7 +3,7 @@ export const GIFT_API_URL: string =
   import.meta.env.VITE_GIFT_API_URL ||
   'https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec';
 
-export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'busy' | 'forbidden' | 'service' | 'network';
+export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'forbidden' | 'service' | 'network';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly reason: ApiReason) {

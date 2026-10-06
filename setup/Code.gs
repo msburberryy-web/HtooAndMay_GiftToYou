@@ -3,7 +3,7 @@
  * Install in the standalone gift Apps Script project (NOT the RSVP form script).
  * Deploy as a web app: Execute as Me, access Anyone. Keep the same deployment so the /exec URL never changes.
  *
- * Guest actions (no token): catalogue, lookup, submit. A guest can only see or change the record of the code they hold.
+ * Guest actions (no token): catalogue, lookup, submit, track (visits & cart), save (up to 5 saved gifts). A guest can only see or change the record of the code they hold.
  * Organiser actions (GIFT_TOKEN required, never put the token in the website): health, state, status.
  */
 const GIFT_SHEET_ID = '1r9ngeMlOthZEMOjPIqVODOOtd2RxbtFa0ljARPOyiTQ';
@@ -21,6 +21,13 @@ const GIFT_ORIGIN = 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou';
 const GIFT_HEADERS = ['Shared code','Partner one','Partner two','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Status','Tracking','Created at','Updated at','QR link'];
 const GIFT_EMAIL_HEADERS = ['Email status','Email fingerprint','Email language'];
 const GIFT_STATUSES = ['Awaiting choice','Requested','Ordered','Shipped','Delivered'];
+// Couples columns U:Z — what each couple has done on the site (Japan time).
+const GIFT_ACTIVITY_HEADERS = ['First visited at','Last visited at','Visits','Cart gift','Cart updated at','Saved gifts'];
+const GIFT_ROW_WIDTH = 26; // A:Z
+const GIFT_MAX_SAVED = 5;
+// The guest list (RSVPs) is cached for an hour to make code checks fast. Unknown codes always re-read the sheet,
+// so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
+const GIFT_REGISTRY_CACHE_SECONDS = 3600;
 const CATALOGUE_HEADERS = ['ID','Brand','Name','Category','Description','Details','Image','Source','Price','Enabled'];
 const GIFT_CATEGORIES = ['Everyday','For the table','At home'];
 const SETTINGS_DEFAULTS = [
@@ -64,6 +71,8 @@ function doPost(e){
   if(action==='catalogue')return output_({ok:true,data:publicCatalogue_()});
   if(action==='lookup')return output_({ok:true,data:lookup_(normalizeCode_(p.code))});
   if(action==='submit'){lock=acquireLock_();return output_({ok:true,data:submit_(p)});}
+  if(action==='track')return output_({ok:true,data:track_(p)});
+  if(action==='save')return output_({ok:true,data:save_(p)});
   if(action==='health'||action==='state'||action==='status'){requireToken_(p);lock=acquireLock_();return output_({ok:true,data:admin_(action,p)});}
   throw fault_('Unknown action.',400,'invalid');
  }catch(error){
@@ -114,17 +123,58 @@ function readSettings_(){
  return {open:bool_(map.open),deadline,message:text_(map.message)};
 }
 function deadlinePassed_(deadline){return !!deadline&&Date.now()>Date.parse(deadline+'T23:59:59+09:00');}
-// Run after editing the Catalogue or Gift settings tab to show changes immediately (otherwise within a minute).
-function refreshCatalogueNow(){CacheService.getScriptCache().remove('catalogue-v2');}
+// Run after editing the Catalogue, Gift settings or RSVPs to apply changes immediately
+// (otherwise within a minute for the catalogue, an hour for RSVP edits).
+function refreshCatalogueNow(){CacheService.getScriptCache().removeAll(['catalogue-v2','registry-v1']);}
 
 /* ───────────── Guest actions ───────────── */
 
 function lookup_(code){
- const entry=rsvpRegistry_().get(code);
- if(!entry)throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');
+ const entry=registryEntry_(code);
  const found=findCoupleRow_(couplesSheet_(),code);
- return {label:entry.label,selection:found&&found.value[3]?selection_(found.value):null};
+ return {label:entry.label,selection:found&&found.value[3]?selection_(found.value):null,saved:found?savedIds_(found.value[25]):[]};
 }
+
+// Records a visit or a cart change. The website calls this in the background; guests never wait for it.
+function track_(p){
+ const code=normalizeCode_(p.code),event=String(p.event||'');
+ if(event!=='visit'&&event!=='cart')throw fault_('Unknown event.',400,'invalid');
+ const sheet=couplesSheet_();ensureActivityColumns_(sheet);
+ const found=activityRow_(sheet,code),row=found.value,now=japanNow_();
+ if(event==='visit'){
+  sheet.getRange(found.row,21,1,3).setNumberFormat('@').setValues([[text_(row[20])||now,now,String((Number(row[22])||0)+1)]]);
+ }else{
+  const giftId=typeof p.giftId==='string'?p.giftId.trim():'';
+  let label='';
+  if(giftId){const gift=publicCatalogue_().gifts.find(g=>g.id===giftId);if(!gift)throw fault_('Unknown gift.',400,'invalid');label=gift.brand+' — '+gift.name;}
+  sheet.getRange(found.row,24,1,2).setNumberFormat('@').setValues([[cell_(label),now]]);
+ }
+ return {saved:true};
+}
+
+// Saves the couple's hearted gifts (up to GIFT_MAX_SAVED), replacing the previous list.
+function save_(p){
+ const code=normalizeCode_(p.code);
+ const ids=Array.isArray(p.saved)?p.saved.filter(v=>typeof v==='string').map(v=>v.trim()).filter(Boolean):null;
+ if(!ids||ids.length!==p.saved.length||new Set(ids).size!==ids.length)throw fault_('Please check your saved gifts.',400,'invalid');
+ if(ids.length>GIFT_MAX_SAVED)throw fault_('You can save up to '+GIFT_MAX_SAVED+' gifts.',400,'limit');
+ const known=new Set(publicCatalogue_().gifts.map(g=>g.id));
+ if(ids.some(id=>!known.has(id)))throw fault_('That gift is no longer available.',409,'unavailable');
+ const sheet=couplesSheet_();ensureActivityColumns_(sheet);
+ const found=activityRow_(sheet,code);
+ sheet.getRange(found.row,26).setNumberFormat('@').setValue(ids.join(', '));
+ return {saved:ids};
+}
+function activityRow_(sheet,code){
+ const entry=registryEntry_(code);
+ let found=findCoupleRow_(sheet,code);
+ if(!found){ // First activity for this couple: create their row under the lock to avoid duplicates.
+  const lock=acquireLock_();
+  try{found=ensureCoupleRow_(sheet,entry);}finally{lock.releaseLock();}
+ }
+ return found;
+}
+function savedIds_(v){return text_(v).split(',').map(x=>x.trim()).filter(Boolean).slice(0,GIFT_MAX_SAVED);}
 
 function submit_(p){
  const code=normalizeCode_(p.code);
@@ -191,8 +241,8 @@ function findCoupleRow_(sheet,code){
  const codes=sheet.getRange(2,1,last-1,1).getValues().map(r=>text_(r[0]).toUpperCase());
  const index=codes.indexOf(code);if(index<0)return null;
  if(codes.indexOf(code,index+1)>=0)throw fault_('Duplicate code in Gift Manager.',503,'service');
- const columns=Math.min(20,sheet.getMaxColumns());
- const value=sheet.getRange(index+2,1,1,columns).getValues()[0];while(value.length<20)value.push('');
+ const columns=Math.min(GIFT_ROW_WIDTH,sheet.getMaxColumns());
+ const value=sheet.getRange(index+2,1,1,columns).getValues()[0];while(value.length<GIFT_ROW_WIDTH)value.push('');
  return {row:index+2,value};
 }
 function ensureCoupleRow_(sheet,entry){
@@ -207,9 +257,21 @@ function ensureCoupleRow_(sheet,entry){
  const value=[entry.code,cell_(first),cell_(second),'','','','','','','','','Awaiting choice','',now,now,GIFT_ORIGIN+'/#code='+entry.code];
  sheet.getRange(row,1,1,16).setNumberFormat('@').setValues([value]);
  SpreadsheetApp.flush();
- return {row,value:value.concat(['','','',''])};
+ while(value.length<GIFT_ROW_WIDTH)value.push('');
+ return {row,value};
 }
 function syncRsvp_(sheet,registry){registry.forEach(entry=>ensureCoupleRow_(sheet,entry));}
+
+// Cached guest list for fast code checks. A code missing from the cache is re-checked against the sheet.
+function registryEntry_(code){
+ const cache=CacheService.getScriptCache(),hit=cache.get('registry-v1');
+ if(hit){const entry=new Map(JSON.parse(hit)).get(code);if(entry)return entry;}
+ const registry=rsvpRegistry_(),json=JSON.stringify(Array.from(registry.entries()));
+ if(json.length<90000)cache.put('registry-v1',json,GIFT_REGISTRY_CACHE_SECONDS);
+ const entry=registry.get(code);
+ if(!entry)throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');
+ return entry;
+}
 
 // Source of truth: a code in the private RSVP sheet, never a public JS list.
 // Rows with problems are skipped (and logged) so one typo cannot take the site down for every guest.
@@ -257,6 +319,13 @@ function ensureEmailColumns_(sheet){
  if(existing.some((v,i)=>v&&v!==GIFT_EMAIL_HEADERS[i]))throw new Error('Gift Manager columns Q:S must be available for email tracking.');
  if(existing.join('|')!==GIFT_EMAIL_HEADERS.join('|'))sheet.getRange(1,17,1,3).setValues([GIFT_EMAIL_HEADERS]);
 }
+function ensureActivityColumns_(sheet){
+ if(sheet.getMaxColumns()<GIFT_ROW_WIDTH)sheet.insertColumnsAfter(sheet.getMaxColumns(),GIFT_ROW_WIDTH-sheet.getMaxColumns());
+ const existing=sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).getValues()[0].map(text_);
+ if(existing.join('|')===GIFT_ACTIVITY_HEADERS.join('|'))return;
+ if(existing.some((v,i)=>v&&v!==GIFT_ACTIVITY_HEADERS[i]))throw new Error('Gift Manager columns U:Z must be available for visit, cart and saved-gift tracking.');
+ sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).setValues([GIFT_ACTIVITY_HEADERS]);
+}
 function ensureRevisionColumn_(sheet){
  if(sheet.getMaxColumns()<20)sheet.insertColumnsAfter(sheet.getMaxColumns(),20-sheet.getMaxColumns());
  const existing=text_(sheet.getRange(1,20).getValues()[0][0]);
@@ -299,7 +368,7 @@ function setupGiftStandalone(){
  const book=giftBook_();book.setSpreadsheetTimeZone(GIFT_TIME_ZONE);
  const sheet=book.getSheetByName(COUPLES_TAB);
  if(!sheet||sheet.getRange(1,1,1,16).getValues()[0].map(text_).join('|')!==GIFT_HEADERS.join('|'))throw new Error('Gift Manager Couples headers do not match. Restore the original headers first.');
- ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);sheet.setFrozenRows(1);sheet.setFrozenColumns(3);
+ ensureEmailColumns_(sheet);ensureRevisionColumn_(sheet);ensureActivityColumns_(sheet);sheet.setFrozenRows(1);sheet.setFrozenColumns(3);
  ensureCatalogueTab_(book);ensureSettingsTab_(book);refreshCatalogueNow();
  MailApp.getRemainingDailyQuota(); // Requests send-mail permission; does not send anything.
  const props=PropertiesService.getScriptProperties();
@@ -333,6 +402,7 @@ function issueCodesForRows_(sh,headers,numbers){
   if(qi>0)sh.getRange(numbers[i],qi).setValue(GIFT_ORIGIN+'/#code='+code);
  });
  SpreadsheetApp.flush();
+ refreshCatalogueNow();
 }
 function retryGiftEmails(){
  const lock=LockService.getScriptLock();lock.waitLock(20000);
@@ -354,7 +424,12 @@ function checkGiftSetup(){
   if(missing.length)throw new Error('Missing columns: '+missing.join(', '));
   return rsvpRegistry_().size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
  });
- step('Couples tab (Gift Manager)',()=>{const sheet=couplesSheet_();return Math.max(0,sheet.getLastRow()-1)+' row(s)';});
+ step('Couples tab (Gift Manager)',()=>{
+  const sheet=couplesSheet_();
+  const activity=sheet.getMaxColumns()>=GIFT_ROW_WIDTH?sheet.getRange(1,21,1,GIFT_ACTIVITY_HEADERS.length).getValues()[0].map(text_).join('|'):'';
+  if(activity!==GIFT_ACTIVITY_HEADERS.join('|'))throw new Error('Columns U:Z ('+GIFT_ACTIVITY_HEADERS.join(', ')+') are not set up. Run setupGiftStandalone.');
+  return Math.max(0,sheet.getLastRow()-1)+' row(s)';
+ });
  step('Gift settings tab',()=>{
   if(!giftBook_().getSheetByName(SETTINGS_TAB))throw new Error('Tab "'+SETTINGS_TAB+'" not found. Run setupGiftStandalone.');
   const s=readSettings_();
@@ -417,6 +492,7 @@ function text_(v){return v instanceof Date?v.toISOString():String(v==null?'':v).
 function bool_(v){return v===true||/^(true|yes|y|1)$/i.test(text_(v));}
 function key_(s){return s.normalize('NFKC').trim().replace(/\s+/g,' ').toLowerCase();}
 function cell_(s){const value=String(s==null?'':s);return /^[=+\-@]/.test(value)?"'"+value:value;}
+function japanNow_(){return Utilities.formatDate(new Date(),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm');}
 function japanTime_(iso){const t=Date.parse(iso);return Number.isFinite(t)?Utilities.formatDate(new Date(t),GIFT_TIME_ZONE,'yyyy-MM-dd HH:mm')+' JST':iso;}
 function invite_(r){const members=[text_(r[1]),text_(r[2])].filter(Boolean);return {code:text_(r[0]),label:members.join(' & '),members,created_at:text_(r[13])};}
 function selection_(r){return {gift_id:text_(r[3]),gift_name:text_(r[4]),recipient:text_(r[5]),email:text_(r[6]),phone:text_(r[7]),postal:text_(r[8]),address:text_(r[9]),note:text_(r[10]),status:text_(r[11]),tracking:text_(r[12]),created_at:text_(r[13]),updated_at:text_(r[14]),first_submitted_at:text_(r[19]||r[14]||r[13])};}

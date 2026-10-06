@@ -47,23 +47,26 @@ const RSVP_ID = '11SA4KyupcO7ElvLnXRSngOxbMIb6G035OtWJqGE_tdM';
 const COUPLES = ['Shared code','Partner one','Partner two','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Status','Tracking','Created at','Updated at','QR link'];
 
 export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
+  // Same columns as the real RSVP sheet ("Shared code" holds the gift code).
+  const H = ['Timestamp','Language','Attending','Shared code','Relationship','Name','Kana / Reading','Party size','Guest name(s)','Kids','Station','Allergy / dietary notes','2次会 (afterparty)','Message'];
+  const guest = (name, partner, attending, party) => H.map(h => ({Name: name, 'Guest name(s)': partner, Attending: attending, 'Party size': party, Language: 'en'})[h] ?? '');
   const rsvp = new Sheet('RSVPs', [
-    ['Name','Guest name(s)','Attending','Party size'],
-    ['Aye Aye','Ko Ko','Yes','2'],
-    ['Su Su','','Yes, happily','1'],
-    ['Not Coming','','No','1'],
-    ['','','Yes','2'],
+    H,
+    guest('Aye Aye', 'Ko Ko', 'Yes', '2'),
+    guest('Su Su', '', 'Yes, happily', '1'),
+    guest('Not Coming', '', 'No', '1'),
+    guest('', '', 'Yes', '2'),
     ...extraRsvpRows,
   ]);
   const couples = new Sheet('Couples', [COUPLES], 16);
   const books = {[GIFT_ID]: new Book(GIFT_ID, {Couples: couples}), [RSVP_ID]: new Book(RSVP_ID, {RSVPs: rsvp})};
   const props = {}, cache = {}, mail = [];
-  const ctx = {
+    const ctx = {
     console: {log() {}, warn() {}, error() {}},
     SpreadsheetApp: {openById: id => books[id], flush() {}},
     LockService: {getScriptLock: () => { let held = false; return {tryLock: () => (held = true), waitLock: () => { held = true; }, hasLock: () => held, releaseLock: () => { held = false; }}; }},
     PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = v; }})},
-    CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }})},
+    CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; })})},
     MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { mail.push(m); }},
     Utilities: {getUuid: () => randomUUID(), formatDate: (d, tz, fmt) => {
       const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(d).map(x => [x.type, x.value]));
@@ -78,7 +81,8 @@ export function setup({mailQuota = 100, extraRsvpRows = []} = {}) {
   const book = books[GIFT_ID];
   const post = body => JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text);
   const header = rsvp.data[0];
-  const codeOf = row => rsvp.data[row - 1][header.indexOf('Gift code')];
+  const codeIndex = header.indexOf('Shared code');
+  const codeOf = row => rsvp.data[row - 1][codeIndex];
   const setSetting = (key, value) => { const s = book.sheets['Gift settings']; const r = s.data.findIndex(x => x[0] === key); s.data[r][1] = value; ctx.refreshCatalogueNow(); };
-  return {ctx, books, book, rsvp, couples, props, mail, post, codeOf, setSetting};
+  return {ctx, books, book, rsvp, couples, props, mail, post, codeOf, codeIndex, setSetting};
 }
