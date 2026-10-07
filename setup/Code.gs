@@ -176,9 +176,53 @@ function lookup_(code){
  if(hit)return JSON.parse(hit);
  const entry=registryEntry_(code);
  const found=findCoupleRow_(couplesSheet_(),code);
- const value={label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[],cart:cartId_(code)};
+ const value=lookupValue_(entry,found&&found.value,cartId_(code));
  cache.put(key,JSON.stringify(value),cacheState_().seconds);
  return value;
+}
+function lookupValue_(entry,row,cart){
+ return {label:entry.label,selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
+}
+// Pre-load: keeps the gift list, the guest list and every couple's (partly hidden) details ready in the cache, so a
+// guest's code check rarely has to open a spreadsheet. Runs with the every-minute email helper; when everything is
+// already cached it only does one quick cache check. Holds the script lock so it never stores details older than an
+// order, cart or heart change made at the same moment.
+function warmGiftCache_(){
+ cacheState__=null;
+ if(cacheState_().seconds!==GIFT_LONG_CACHE_SECONDS)return; // only once the edit triggers keep the cache correct
+ const cache=CacheService.getScriptCache();
+ const regKey=cacheKey_('registry-v2'),catKey=cacheKey_('catalogue-v3');
+ const have=cache.getAll([regKey,catKey]);
+ let registry=have[regKey]?new Map(JSON.parse(have[regKey])):null;
+ if(!have[catKey])publicCatalogue_();
+ if(!registry){
+  registry=rsvpRegistry_();
+  const json=JSON.stringify(Array.from(registry.entries()));
+  if(json.length<90000)cache.put(regKey,json,GIFT_LONG_CACHE_SECONDS);
+ }
+ const codes=Array.from(registry.keys());
+ if(!codes.length)return;
+ const present=cache.getAll(codes.map(lookupKey_));
+ const missing=codes.filter(code=>!present[lookupKey_(code)]);
+ if(!missing.length)return;
+ const lock=LockService.getScriptLock();if(!lock.tryLock(3000))return; // busy: try again next minute
+ try{
+  const sheet=couplesSheet_(),last=sheet.getLastRow(),rows={};
+  if(last>=2){
+   const columns=Math.min(GIFT_ROW_WIDTH,sheet.getMaxColumns()),seen={};
+   sheet.getRange(2,1,last-1,columns).getValues().forEach(value=>{
+    const code=text_(value[0]).toUpperCase();if(!code)return;
+    while(value.length<GIFT_ROW_WIDTH)value.push('');
+    if(seen[code])rows[code]=null;else{seen[code]=1;rows[code]=value;} // duplicates: leave to lookup_ to report
+   });
+  }
+  const props=PropertiesService.getScriptProperties().getProperties(),values={};
+  missing.forEach(code=>{
+   if(rows[code]===null)return;
+   values[lookupKey_(code)]=JSON.stringify(lookupValue_(registry.get(code),rows[code]||null,props['CART_'+code]));
+  });
+  if(Object.keys(values).length)cache.putAll(values,GIFT_LONG_CACHE_SECONDS);
+ }finally{lock.releaseLock();}
 }
 
 // Records a visit or a cart change. The website calls this in the background; guests never wait for it.
@@ -193,8 +237,9 @@ function track_(p){
   const giftId=typeof p.giftId==='string'?p.giftId.trim():'';
   let label='';
   if(giftId){const gift=publicCatalogue_().gifts.find(g=>g.id===giftId);if(!gift)throw fault_('Unknown gift.',400,'invalid');label=gift.brand+' — '+gift.name;}
-  sheet.getRange(found.row,24,1,2).setNumberFormat('@').setValues([[cell_(label),now]]);
-  setCartId_(code,giftId);forgetLookup_(code);
+  const lock=acquireLock_();
+  try{sheet.getRange(found.row,24,1,2).setNumberFormat('@').setValues([[cell_(label),now]]);setCartId_(code,giftId);forgetLookup_(code);}
+  finally{lock.releaseLock();}
  }
  return {saved:true};
 }
@@ -209,8 +254,9 @@ function save_(p){
  if(ids.some(id=>!known.has(id)))throw fault_('That gift is no longer available.',409,'unavailable');
  const sheet=couplesSheet_(true);
  const found=activityRow_(sheet,code);
- sheet.getRange(found.row,26).setNumberFormat('@').setValue(ids.join(', '));
- forgetLookup_(code);
+ const lock=acquireLock_();
+ try{sheet.getRange(found.row,26).setNumberFormat('@').setValue(ids.join(', '));forgetLookup_(code);}
+ finally{lock.releaseLock();}
  return {saved:ids};
 }
 function activityRow_(sheet,code){
@@ -753,6 +799,7 @@ function sendOrQueueEmails_(sheet,rowNo,r,language,previous,notify){
  return 'queued';
 }
 function processGiftEmailQueue(){
+ try{warmGiftCache_();}catch(error){console.warn('Pre-load skipped: '+(error.message||error));}
  const props=PropertiesService.getScriptProperties();
  const keys=Object.keys(props.getProperties()).filter(k=>k.indexOf(MAIL_QUEUE_PREFIX)===0).sort();
  if(!keys.length)return;

@@ -63,3 +63,14 @@ Local development: `npm install`, then `npm run dev`. `npm test` checks the Apps
 3. Choose a gift, enter real delivery details, confirm. Check the Couples row and the confirmation email.
 4. Change the gift once (within 48 h), then set Status to Ordered and confirm the page shows it as locked.
 5. Untick `Open` again (or keep it open if launching) and clear the test row.
+
+## 5. Faster first visits (optional, free)
+
+**Pre-loading (automatic).** The every-minute background helper also keeps the gift list, the guest list and every couple's partly hidden details ready in Apps Script's cache. A guest's code check then rarely has to open a spreadsheet. Editing either spreadsheet clears the cache, and it is refilled within a minute. Nothing to set up: paste the latest `Code.gs` and deploy a **New version**.
+
+**Keep the script awake.** Google lets an unused script fall asleep, and the next guest waits 1–2 seconds for it to start. A free monitoring service can visit the script every 5 minutes so it stays awake:
+
+1. Create a free account at [uptimerobot.com](https://uptimerobot.com).
+2. **New monitor** → type **HTTP(s)** → paste your Apps Script `/exec` URL → interval **5 minutes** → create.
+
+The visit only gets back `{"ok":true,"data":{"service":"htoo-may-gift","version":2}}`. It doesn't open any spreadsheet, doesn't see guest data, and isn't counted as a guest visit. The service only knows the `/exec` address, which is already public in the website. As a bonus, it emails you if the gift site stops responding. Delete the monitor after the event.

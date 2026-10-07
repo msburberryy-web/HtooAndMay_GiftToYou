@@ -576,3 +576,36 @@ test('init: gift list and guest details in one request; unknown codes reported w
   assert.equal(none.data.lookup, undefined);
   assert.ok(none.data.catalogue);
 });
+
+test('speed: the background job pre-loads every guest, so code checks need no spreadsheet', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const [a, b] = [s.codeOf(2), s.codeOf(3)];
+  s.post({action: 'submit', code: a, consent: true, data: delivery});
+  s.post({action: 'track', code: b, event: 'cart', giftId: 'hario-mug'});
+  s.post({action: 'save', code: b, saved: ['hario-mug']});
+  const expected = {[a]: s.post({action: 'lookup', code: a}).data, [b]: s.post({action: 'lookup', code: b}).data};
+  s.ctx.refreshCatalogueNow(); // an organiser edit: everything cached is now out of date
+  s.ctx.processGiftEmailQueue(); // the every-minute job fills the cache again
+  const open = s.ctx.SpreadsheetApp.openById;
+  s.ctx.SpreadsheetApp.openById = () => { throw new Error('spreadsheet opened'); };
+  try {
+    for (const code of [a, b]) assert.deepEqual(s.post({action: 'lookup', code}).data, expected[code]);
+    const init = s.post({action: 'init', code: b});
+    assert.equal(init.ok, true);
+    assert.equal(init.data.lookup.cart, 'hario-mug');
+    assert.deepEqual(init.data.lookup.saved, ['hario-mug']);
+    assert.match(expected[a].selection.email, /•/, 'pre-loaded details stay partly hidden');
+  } finally { s.ctx.SpreadsheetApp.openById = open; }
+  // Changes made after the pre-load still show at once.
+  s.post({action: 'track', code: b, event: 'cart', giftId: ''});
+  assert.equal(s.post({action: 'lookup', code: b}).data.cart, '');
+});
+
+test('speed: no pre-load before setup has installed the edit triggers', () => {
+  const s = setup();
+  s.props.EDIT_TRIGGERS = '0'; s.ctx.refreshCatalogueNow();
+  let opened = 0; const open = s.ctx.SpreadsheetApp.openById;
+  s.ctx.SpreadsheetApp.openById = id => { opened++; return open(id); };
+  s.ctx.processGiftEmailQueue();
+  assert.equal(opened, 0);
+});
