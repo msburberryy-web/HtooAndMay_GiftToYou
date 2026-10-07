@@ -1,4 +1,4 @@
-# Htoo & May — The Gift Edit
+# Htoo & May — With Love & Thanks
 
 Guest gift catalogue for Htoo & May's wedding, published on GitHub Pages:
 https://msburberryy-web.github.io/HtooAndMay_GiftToYou/
