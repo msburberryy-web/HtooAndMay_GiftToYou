@@ -8,9 +8,9 @@ export default function OrderStatus({order,gift,language,busy,onRefresh}:{order:
  const current=stages.findIndex(([value])=>value===order.status);
  return <section id="my-order" className="saved-order" aria-label={text('My gift and delivery progress','ရွေးထားသောလက်ဆောင်နှင့် ပို့ဆောင်မှုအခြေအနေ')}>
   <div className="saved-order-heading"><h2>{text('My gift & delivery progress','ရွေးထားသောလက်ဆောင်နှင့် ပို့ဆောင်မှုအခြေအနေ')}</h2><button className="outline" disabled={busy} onClick={onRefresh}>{busy?text('Checking…','စစ်ဆေးနေပါသည်…'):text('Refresh status','အခြေအနေ ပြန်စစ်ရန်')}</button></div>
+  <StatusScene status={order.status} label={stages[current]?.[1]||order.status}/>
   <div className="selected-summary">{gift&&<img src={gift.image} srcSet={gift.srcSet} sizes="110px" alt="" onError={imageFallback}/>}<div><strong>{gift?gift.brand:order.gift_name||text('Your saved gift','သင်ရွေးထားသောလက်ဆောင်')}</strong>{gift&&<p>{gift.name}</p>}<p>{text('Quantity · 1','အရေအတွက် · ၁')}</p></div></div>
   {order.order_id&&<p className="order-id">{text('Order ID','မှာယူမှုနံပါတ်')}: <strong>{order.order_id}</strong></p>}
-  <StatusScene status={order.status} label={stages[current]?.[1]||order.status}/>
   <p role="status">{text('Delivery status','ပို့ဆောင်မှုအခြေအနေ')}: {stages[current]?.[1]||order.status}</p>
   <ol className="delivery-progress" aria-label={text('Delivery progress','ပို့ဆောင်မှုအဆင့်များ')}>{stages.map(([key,label],i)=><li key={key} className={current>=i?'reached':''} aria-current={current===i?'step':undefined}><span aria-hidden="true">{current>i||(i===current&&i===stages.length-1)?'✓':i+1}</span>{label}</li>)}</ol>
   {order.tracking&&<p>{text('Tracking reference','ပို့ဆောင်မှု ခြေရာခံနံပါတ်')}: <strong>{order.tracking}</strong></p>}
