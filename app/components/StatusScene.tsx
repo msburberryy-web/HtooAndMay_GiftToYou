@@ -1,7 +1,7 @@
 import DeliveryScene from './DeliveryScene';
 
 // Small animated scene for each order status, in the wedding palette.
-// Requested → envelope on its way · Ordered → gift being wrapped · Shipped → delivery scooter · Delivered → gift at the door.
+// Awaiting choice → heart hopping between gifts · Requested → envelope on its way · Ordered → gift being wrapped · Shipped → delivery scooter · Delivered → gift at the door.
 // Motion stops for visitors who prefer reduced motion (see .status-scene in globals.css).
 const heart = (x: number, y: number, s = 1) => `M${x} ${y + 3 * s} C${x - 7 * s} ${y - 4 * s} ${x - 3 * s} ${y - 10 * s} ${x} ${y - 5 * s} C${x + 3 * s} ${y - 10 * s} ${x + 7 * s} ${y - 4 * s} ${x} ${y + 3 * s} Z`;
 const sparkle = (x: number, y: number, r: number) => `M${x} ${y - r} L${x + r * 0.28} ${y - r * 0.28} L${x + r} ${y} L${x + r * 0.28} ${y + r * 0.28} L${x} ${y + r} L${x - r * 0.28} ${y + r * 0.28} L${x - r} ${y} L${x - r * 0.28} ${y - r * 0.28} Z`;
@@ -21,6 +21,24 @@ function EnvelopeScene() {
       <path d={heart(228, 112, 0.7)} fill="#fbf5e9"/>
       <path className="speed" d="M160 92 H142 M164 106 H134 M160 120 H146" stroke="#b4935d" strokeWidth="3" strokeLinecap="round"/>
     </g>
+  </svg>;
+}
+
+function ChoosingScene() {
+  const box = (x: number, w: number, h: number, body: string, lid: string) => <>
+    <rect x={x} y={166 - h} width={w} height={h} rx="3" fill={body}/>
+    <rect x={x + w / 2 - 5} y={166 - h} width="10" height={h} fill="#7c3241"/>
+    <rect x={x - 4} y={158 - h} width={w + 8} height="10" rx="2" fill={lid}/>
+    <path d={`M${x + w / 2} ${158 - h} C${x + w / 2 - 14} ${142 - h} ${x + w / 2 - 26} ${150 - h} ${x + w / 2 - 16} ${157 - h} Z M${x + w / 2} ${158 - h} C${x + w / 2 + 14} ${142 - h} ${x + w / 2 + 26} ${150 - h} ${x + w / 2 + 16} ${157 - h} Z`} fill="#7c3241"/>
+  </>;
+  return <svg viewBox="0 0 320 190" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <rect x="30" y="166" width="260" height="6" rx="3" fill="#e2d8c8"/>
+    <g className="pick-box b1">{box(52, 58, 44, '#e9e1d3', '#f3ece0')}</g>
+    <g className="pick-box b2">{box(131, 58, 58, '#b4935d', '#c9a46a')}</g>
+    <g className="pick-box b3">{box(210, 58, 40, '#c98b97', '#ddb0b8')}</g>
+    <g className="twinkle t1"><path d={sparkle(40, 70, 7)} fill="#b4935d"/></g>
+    <g className="twinkle t3"><path d={sparkle(284, 82, 6)} fill="#c98b97"/></g>
+    <g className="picker"><path d={heart(81, 50, 1.8)} fill="#7c3241"/><path d="M81 62 V80" stroke="#7c3241" strokeWidth="2" strokeLinecap="round" strokeDasharray="2 5"/></g>
   </svg>;
 }
 
@@ -65,6 +83,6 @@ function DeliveredScene() {
 
 export default function StatusScene({status, label}: {status: string; label: string}) {
   if (status === 'Shipped') return <DeliveryScene label={label}/>;
-  const scene = status === 'Ordered' ? <WrappingScene/> : status === 'Delivered' ? <DeliveredScene/> : <EnvelopeScene/>;
+  const scene = status === 'Ordered' ? <WrappingScene/> : status === 'Delivered' ? <DeliveredScene/> : status === 'Requested' ? <EnvelopeScene/> : <ChoosingScene/>;
   return <figure className={`status-scene scene-${status.toLowerCase()}`} aria-label={label} role="img">{scene}</figure>;
 }

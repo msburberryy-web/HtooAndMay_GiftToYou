@@ -272,6 +272,11 @@ body{font-family:'Manrope',Arial,sans-serif}
 .status-scene .twinkle.t2{animation-delay:.45s}.status-scene .twinkle.t3{animation-delay:.9s}.status-scene .twinkle.t4{animation-delay:1.35s}
 .status-scene .arrived{animation:arrive .9s cubic-bezier(.2,.8,.2,1) both}
 .status-scene .check-pop{transform-box:fill-box;transform-origin:center;animation:pop .6s .5s cubic-bezier(.2,1.6,.4,1) both}
+.status-scene .picker{animation:pick 4.8s ease-in-out infinite}
+.status-scene .pick-box{transform-box:fill-box;transform-origin:bottom center;animation:pick-hop 4.8s ease-in-out infinite}
+.status-scene .pick-box.b2{animation-delay:1.2s}.status-scene .pick-box.b3{animation-delay:2.4s}
+@keyframes pick{0%,15%{transform:translateX(0)}25%,40%{transform:translateX(79px)}50%,65%{transform:translateX(158px)}75%,90%{transform:translateX(79px)}100%{transform:translateX(0)}}
+@keyframes pick-hop{0%,4%,14%,100%{transform:none}9%{transform:translateY(-6px)}}
 @keyframes env-fly{0%,100%{transform:translate(0,0) rotate(-3deg)}50%{transform:translate(6px,-8px) rotate(2deg)}}
 @keyframes speed-fade{0%,100%{opacity:.25}50%{opacity:1}}
 @keyframes trail{to{stroke-dashoffset:-24}}
