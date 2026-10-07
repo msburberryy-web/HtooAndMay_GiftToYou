@@ -78,7 +78,7 @@ export function setup(opts = {}) {
     ScriptApp: {getProjectTriggers: () => triggers, newTrigger: fn => { const t = {fn}; const b = {forSpreadsheet: id => { t.id = id; return b; }, onEdit: () => b, timeBased: () => b, everyMinutes: m => { t.every = m; return b; }, create: () => { triggers.push({getHandlerFunction: () => fn, id: t.id, every: t.every}); }}; return b; }},
     LockService: {getScriptLock: () => { let held = false; return {tryLock: () => (held = true), waitLock: () => { held = true; }, hasLock: () => held, releaseLock: () => { held = false; }}; }},
     PropertiesService: {getScriptProperties: () => ({getProperty: k => props[k] ?? null, setProperty: (k, v) => { props[k] = String(v); }, getProperties: () => ({...props}), deleteProperty: k => { delete props[k]; }})},
-    CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; })})},
+    CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; }), getAll: ks => Object.fromEntries(ks.filter(k => k in cache).map(k => [k, cache[k]])), putAll: o => { Object.assign(cache, o); }})},
     MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { if (ctx.MailApp.getRemainingDailyQuota() < 1) throw new Error('quota'); (m.to === OWNER ? notices : mail).push(m); }},
     Session: {getEffectiveUser: () => ({getEmail: () => OWNER})},
     Utilities: {getUuid: () => randomUUID(), formatDate: (d, tz, fmt) => {
