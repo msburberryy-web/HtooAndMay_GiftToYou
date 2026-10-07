@@ -741,7 +741,9 @@ function sendGiftConfirmation_(sheet,row,r,language){
 function sendOrQueueEmails_(sheet,rowNo,r,language,previous,notify){
  if(!cacheState_().mailTrigger){const status=sendGiftConfirmation_(sheet,rowNo,r,language);if(notify)notifyOrganiser_(r,previous,status);return status;}
  sheet.getRange(rowNo,17).setValue('Queued');
- PropertiesService.getScriptProperties().setProperty(MAIL_QUEUE_PREFIX+Date.now()+'_'+Utilities.getUuid().slice(0,8)+'_'+text_(r[0]),JSON.stringify({code:text_(r[0]),language,notify,previous:previous||null,row:r.map(text_)}));
+ // Running number (submits hold the script lock) keeps emails in the order the requests were made.
+ const props=PropertiesService.getScriptProperties(),seq=(Number(props.getProperty('MAIL_SEQ'))||0)+1;props.setProperty('MAIL_SEQ',String(seq));
+ props.setProperty(MAIL_QUEUE_PREFIX+String(seq).padStart(9,'0')+'_'+text_(r[0]),JSON.stringify({code:text_(r[0]),language,notify,previous:previous||null,row:r.map(text_)}));
  return 'queued';
 }
 function processGiftEmailQueue(){

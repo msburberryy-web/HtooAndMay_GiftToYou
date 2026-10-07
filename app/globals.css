@@ -256,3 +256,4 @@ body{font-family:'Manrope',Arial,sans-serif}
 .change-box{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px dashed #b4935d;background:#fffdf8;padding:14px 18px;margin-top:8px}
 .change-box p{margin:0;font-size:14px;color:#3f362e;flex:1 1 260px}
 .welcome-order{margin:12px auto 4px;display:flex}
+.cart-note{margin:0;padding:12px 14px;border-left:3px solid #7c3241;background:#f5e3de;color:#5a1f2d;font-size:14px!important;line-height:1.55}
