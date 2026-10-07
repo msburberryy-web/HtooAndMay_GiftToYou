@@ -170,7 +170,7 @@ function lookup_(code){
  if(hit)return JSON.parse(hit);
  const entry=registryEntry_(code);
  const found=findCoupleRow_(couplesSheet_(),code);
- const value={label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[]};
+ const value={label:entry.label,selection:found&&found.value[3]?maskSelection_(selection_(found.value)):null,saved:found?savedIds_(found.value[25]):[],cart:cartId_(code)};
  cache.put(key,JSON.stringify(value),cacheState_().seconds);
  return value;
 }
@@ -188,6 +188,7 @@ function track_(p){
   let label='';
   if(giftId){const gift=publicCatalogue_().gifts.find(g=>g.id===giftId);if(!gift)throw fault_('Unknown gift.',400,'invalid');label=gift.brand+' — '+gift.name;}
   sheet.getRange(found.row,24,1,2).setNumberFormat('@').setValues([[cell_(label),now]]);
+  setCartId_(code,giftId);forgetLookup_(code);
  }
  return {saved:true};
 }
@@ -215,6 +216,10 @@ function activityRow_(sheet,code){
  }
  return found;
 }
+// The cart (one gift) is remembered by gift ID in Script properties, so it comes back on reloads, return visits and
+// other devices even if a gift is renamed. Couples › Cart gift shows the readable name for the organiser.
+function cartId_(code){return text_(PropertiesService.getScriptProperties().getProperty('CART_'+code));}
+function setCartId_(code,giftId){const p=PropertiesService.getScriptProperties();if(giftId)p.setProperty('CART_'+code,giftId);else p.deleteProperty('CART_'+code);}
 function savedIds_(v){return text_(v).split(',').map(x=>x.trim()).filter(Boolean).slice(0,GIFT_MAX_SAVED);}
 
 function submit_(p){
@@ -247,6 +252,7 @@ function submit_(p){
  sheet.getRange(found.row,4,1,12).setNumberFormat('@').setValues([[cell_(gift.id),cell_(giftName),cell_(d.recipient),cell_(d.email),cell_(d.phone),cell_(d.postal),cell_(d.address),cell_(d.note),'Requested',row[12],text_(row[13])||now,now]]);
  sheet.getRange(found.row,20).setNumberFormat('@').setValue(firstSubmitted);
  sheet.getRange(found.row,GIFT_ORDER_COLUMN,1,2).setNumberFormat('@').setValues([[orderId,changesCloseAt_(firstSubmitted)]]);
+ sheet.getRange(found.row,24,1,2).setNumberFormat('@').setValues([['',japanNow_()]]);setCartId_(code,''); // the ordered gift leaves the cart
  SpreadsheetApp.flush();
  forgetLookup_(code);
  // The row as just written (no extra sheet read needed).

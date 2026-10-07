@@ -14,7 +14,7 @@ const empty={recipient:'',email:'',phone:'',postal:'',address:'',note:''};
 // Short technical reference shown under service errors, to help the organiser diagnose problems.
 const errorRef=(action:string,e:unknown)=>e instanceof ApiError?`Ref: ${action} · ${e.reason}${e.status?' '+e.status:''} · ${e.message}`:`Ref: ${action} · ${e instanceof Error?e.message:'error'}`;
 const MAX_SAVED=5;
-type LookupData={label:string;selection:Selection|null;saved?:string[]};
+type LookupData={label:string;selection:Selection|null;saved?:string[];cart?:string};
 const prepareConfig=(d:Config):Config=>({...d,gifts:d.gifts.map(g=>({...g,...giftImage(g.image)}))});
 type Field='recipient'|'email'|'phone'|'postal'|'address'|'consent';
 const FIELD_ORDER:Field[]=['recipient','email','phone','postal','address','consent'];
@@ -24,10 +24,11 @@ const hasPendingCode=()=>{try{return /^#code=[A-Za-z0-9]{6,40}/.test(window.loca
 const pickForm=(f:typeof empty)=>({recipient:f.recipient,email:f.email,phone:f.phone,postal:f.postal,address:f.address,note:f.note});
 export default function Catalogue(){
  const [lang,setLang]=useState<'en'|'my'>('en'),[config,setConfig]=useState<Config>(defaultConfig),[loaded,setLoaded]=useState(false),[loadError,setLoadError]=useState(''),[category,setCategory]=useState('All gifts');
- const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
+ const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[pendingCart,setPendingCart]=useState<string|null>(null),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
  const toastTimer=useRef<number|undefined>(undefined);
  function notify(message:string){setToast(message);window.clearTimeout(toastTimer.current);toastTimer.current=window.setTimeout(()=>setToast(''),2400)}
  const saveSeq=useRef(0);
+ const cartRestored=useRef(false);
  const t=giftCopy[lang];
  const ended=!!config.deadline&&Date.now()>new Date(config.deadline+'T23:59:59+09:00').getTime();
  function resetGuest(){if(verified)void forgetGuest(verified);setVerified('');setLabel('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
@@ -39,7 +40,7 @@ export default function Catalogue(){
  async function lookup(value=code,showExisting=false){
   setError('');const normalized=value.replace(/[\s-]/g,'').toUpperCase();
   const refreshing=verified===normalized;
-  const apply=(d:LookupData,keepForm:boolean)=>{setSaved(d.saved??[]);setLabel(d.label);setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
+  const apply=(d:LookupData,keepForm:boolean)=>{setPendingCart(d.cart??'');setSaved(d.saved??[]);setLabel(d.label);setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
   const cached=showExisting||refreshing?null:await readGuest<LookupData>(normalized);
   if(cached){apply(cached,false);setOpening(false)}
   setBusy(!cached);
@@ -55,10 +56,18 @@ export default function Catalogue(){
    setError(guestError(e));
   }finally{setBusy(false)}}
  const lookupRef=useRef(lookup);lookupRef.current=lookup;
+ // The one-gift cart is remembered by the sheet (by gift ID): restore it on reloads, return visits and other devices.
+ useEffect(()=>{
+  if(pendingCart===null)return;
+  if(!pendingCart){if(cartRestored.current){setCart(null);cartRestored.current=false}setPendingCart(null);return}
+  const g=config.gifts.find(x=>x.id===pendingCart&&x.enabled);
+  if(g){setCart(c=>{if(c)return c;cartRestored.current=true;return g})}
+  if(g||loaded)setPendingCart(null);
+ },[pendingCart,config,loaded]);
  // Activity for the organiser's sheet (visits, cart). Sent in the background; failures are ignored.
  function track(payload:Record<string,unknown>){void callGiftApi('track',payload).catch(e=>console.warn('Activity not recorded',e))}
  function recordVisit(c:string){const key='gift-visit-'+c;try{if(sessionStorage.getItem(key))return;sessionStorage.setItem(key,'1')}catch{}track({code:c,event:'visit'})}
- function setCartGift(gift:Gift|null){if((gift?.id??'')!==(cart?.id??'')&&verified)track({code:verified,event:'cart',giftId:gift?.id??''});setCart(gift)}
+ function setCartGift(gift:Gift|null){cartRestored.current=false;if((gift?.id??'')!==(cart?.id??'')&&verified)track({code:verified,event:'cart',giftId:gift?.id??''});setCart(gift)}
  function toggleSaved(id:string){
   const previous=saved,next=saved.includes(id)?saved.filter(x=>x!==id):[...saved,id];
   if(next.length>MAX_SAVED){setSaveNote(t.saveLimit);return}
@@ -72,7 +81,7 @@ export default function Catalogue(){
   const onHash=()=>{const c=cardCode();if(c){setCode(c.toUpperCase());setOpening(true);void lookupRef.current(c).finally(()=>setOpening(false))}};window.addEventListener('hashchange',onHash);return()=>window.removeEventListener('hashchange',onHash)},[]);
  function switchLang(l:'en'|'my'){if(l==='my')void import('@/lib/burmese-font');setLang(l);localStorage.setItem('gift-language',l)}
  function openCart(){setDetail(null);setStage('cart');setPanel(true);setError('')}
- function add(gift:Gift|null=detail){if(!gift||locked)return;setCartGift(gift);openCart();setConsent(false);notify(t.added)}
+ function add(gift:Gift|null=detail){if(!gift||locked)return;const replacing=!!cart&&cart.id!==gift.id;setCartGift(gift);openCart();setConsent(false);notify(replacing?t.cartReplaced.replace('{name}',`${gift.brand} ${gift.name}`):t.added)}
  async function submit(){if(!cart||!verified||!consent)return;setBusy(true);setError('');try{const d=await callGiftApi<{gift_name?:string;order_id?:string;emailStatus?:string;first_submitted_at?:string}>('submit',{code:verified,consent,language:lang,data:{...pickForm(form),gift_id:cart.id}});setSelection({...pickForm(form),gift_id:cart.id,gift_name:d.gift_name,order_id:d.order_id,status:'Requested',tracking:'',first_submitted_at:d.first_submitted_at??selection?.first_submitted_at});setEmailStatus(d.emailStatus??'');try{sessionStorage.removeItem(draftKey(verified))}catch{}setStage('success')}catch(e){setError(guestError(e))}finally{setBusy(false)}}
  useEffect(()=>{if(focusOrder){setView('order');setFocusOrder(false)}},[focusOrder]);
  const [clock,setClock]=useState(Date.now());
