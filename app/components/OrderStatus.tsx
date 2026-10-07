@@ -1,4 +1,5 @@
 import {imageFallback} from '@/lib/api';
+import StatusScene from './StatusScene';
 type SavedOrder={masked?:boolean;order_id?:string;gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;updated_at?:string};
 export default function OrderStatus({order,gift,language,busy,onRefresh}:{order:SavedOrder;gift?:{brand:string;name:string;image:string;srcSet?:string};language:'en'|'my';busy:boolean;onRefresh:()=>void}){
  const my=language==='my';
@@ -9,8 +10,9 @@ export default function OrderStatus({order,gift,language,busy,onRefresh}:{order:
   <div className="saved-order-heading"><h2>{text('My gift & delivery progress','ရွေးထားသောလက်ဆောင်နှင့် ပို့ဆောင်မှုအခြေအနေ')}</h2><button className="outline" disabled={busy} onClick={onRefresh}>{busy?text('Checking…','စစ်ဆေးနေပါသည်…'):text('Refresh status','အခြေအနေ ပြန်စစ်ရန်')}</button></div>
   <div className="selected-summary">{gift&&<img src={gift.image} srcSet={gift.srcSet} sizes="110px" alt="" onError={imageFallback}/>}<div><strong>{gift?gift.brand:order.gift_name||text('Your saved gift','သင်ရွေးထားသောလက်ဆောင်')}</strong>{gift&&<p>{gift.name}</p>}<p>{text('Quantity · 1','အရေအတွက် · ၁')}</p></div></div>
   {order.order_id&&<p className="order-id">{text('Order ID','မှာယူမှုနံပါတ်')}: <strong>{order.order_id}</strong></p>}
+  <StatusScene status={order.status} label={stages[current]?.[1]||order.status}/>
   <p role="status">{text('Delivery status','ပို့ဆောင်မှုအခြေအနေ')}: {stages[current]?.[1]||order.status}</p>
-  <ol className="delivery-progress" aria-label={text('Delivery progress','ပို့ဆောင်မှုအဆင့်များ')}>{stages.map(([key,label],i)=><li key={key} className={current>=i?'reached':''} aria-current={current===i?'step':undefined}><span aria-hidden="true">{current>i?'✓':i+1}</span>{label}</li>)}</ol>
+  <ol className="delivery-progress" aria-label={text('Delivery progress','ပို့ဆောင်မှုအဆင့်များ')}>{stages.map(([key,label],i)=><li key={key} className={current>=i?'reached':''} aria-current={current===i?'step':undefined}><span aria-hidden="true">{current>i||(i===current&&i===stages.length-1)?'✓':i+1}</span>{label}</li>)}</ol>
   {order.tracking&&<p>{text('Tracking reference','ပို့ဆောင်မှု ခြေရာခံနံပါတ်')}: <strong>{order.tracking}</strong></p>}
   <dl className="order-review">{[[text('Recipient','လက်ခံမည့်သူ'),order.recipient],[text('Email','အီးမေးလ်'),order.email],[text('Phone','ဖုန်းနံပါတ်'),order.phone],[text('Postcode','စာပို့သင်္ကေတ'),order.postal],[text('Delivery address','ပို့ဆောင်ရမည့်လိပ်စာ'),order.address],...(order.note?[[text('Delivery note','ပို့ဆောင်ရန်မှတ်ချက်'),order.note]]:[])].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
   {order.masked&&<p className="fine">{text('For your privacy, contact and address details are partly hidden here. Your full details are kept safely by Htoo & May. If you change your gift, please enter your delivery details again.','သင့်ကိုယ်ရေးအချက်အလက်များ လုံခြုံစေရန် ဆက်သွယ်ရန်နှင့် လိပ်စာအချက်အလက်များကို တစ်စိတ်တစ်ပိုင်း ဖုံးထားပါသည်။ အချက်အလက်အပြည့်အစုံကို Htoo နဲ့ May က လုံခြုံစွာ သိမ်းဆည်းထားပါတယ်။ လက်ဆောင်ပြောင်းလဲပါက ပို့ဆောင်ရန်အချက်အလက်များကို ထပ်မံဖြည့်ပေးပါ။')}</p>}

@@ -257,3 +257,29 @@ body{font-family:'Manrope',Arial,sans-serif}
 .change-box p{margin:0;font-size:14px;color:#3f362e;flex:1 1 260px}
 .welcome-order{margin:12px auto 4px;display:flex}
 .cart-note{margin:0;padding:12px 14px;border-left:3px solid #7c3241;background:#f5e3de;color:#5a1f2d;font-size:14px!important;line-height:1.55}
+
+/* Status scenes (envelope · wrapping · scooter · at the door) */
+.status-scene{margin:0 auto;width:100%;max-width:340px}
+.status-scene svg{display:block;width:100%;height:auto;overflow:visible}
+.status-scene .envelope{transform-box:fill-box;transform-origin:center;animation:env-fly 2.4s ease-in-out infinite}
+.status-scene .speed{animation:speed-fade 1.2s ease-in-out infinite}
+.status-scene .trail{animation:trail 1.6s linear infinite}
+.status-scene .float-heart{transform-box:fill-box;transform-origin:center;animation:float-heart 3s ease-in-out infinite}
+.status-scene .float-heart.h2{animation-delay:.8s}.status-scene .float-heart.h3{animation-delay:1.6s}
+.status-scene .gift-lid{transform-box:fill-box;transform-origin:bottom center;animation:lid 2.2s ease-in-out infinite}
+.status-scene .gift-tag{transform-box:fill-box;transform-origin:top left;animation:sway 2.2s ease-in-out infinite}
+.status-scene .twinkle{transform-box:fill-box;transform-origin:center;animation:twinkle 1.8s ease-in-out infinite}
+.status-scene .twinkle.t2{animation-delay:.45s}.status-scene .twinkle.t3{animation-delay:.9s}.status-scene .twinkle.t4{animation-delay:1.35s}
+.status-scene .arrived{animation:arrive .9s cubic-bezier(.2,.8,.2,1) both}
+.status-scene .check-pop{transform-box:fill-box;transform-origin:center;animation:pop .6s .5s cubic-bezier(.2,1.6,.4,1) both}
+@keyframes env-fly{0%,100%{transform:translate(0,0) rotate(-3deg)}50%{transform:translate(6px,-8px) rotate(2deg)}}
+@keyframes speed-fade{0%,100%{opacity:.25}50%{opacity:1}}
+@keyframes trail{to{stroke-dashoffset:-24}}
+@keyframes float-heart{0%{opacity:0;transform:translateY(8px) scale(.8)}30%{opacity:1}100%{opacity:0;transform:translateY(-18px) scale(1.05)}}
+@keyframes lid{0%,100%{transform:translateY(0)}35%{transform:translateY(-14px) rotate(-3deg)}60%{transform:translateY(0)}}
+@keyframes sway{0%,100%{transform:rotate(0)}50%{transform:rotate(6deg)}}
+@keyframes twinkle{0%,100%{opacity:.2;transform:scale(.6)}50%{opacity:1;transform:scale(1)}}
+@keyframes arrive{from{opacity:0;transform:translateY(-24px)}to{opacity:1;transform:none}}
+@keyframes pop{from{opacity:0;transform:scale(.3)}to{opacity:1;transform:scale(1)}}
+.saved-order .status-scene,.saved-order .delivery-scene{max-width:280px;margin:4px auto 10px}
+@media(prefers-reduced-motion:reduce){.status-scene *{animation:none!important}}
