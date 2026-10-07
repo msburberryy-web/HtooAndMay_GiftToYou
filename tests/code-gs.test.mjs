@@ -560,3 +560,19 @@ test('cart: one gift remembered by ID across visits, replaced when another is ad
   s.post({action: 'track', code, event: 'cart', giftId: ''});
   assert.equal(s.post({action: 'lookup', code}).data.cart, '');
 });
+
+test('init: gift list and guest details in one request; unknown codes reported without failing the list', () => {
+  const s = setup();
+  const code = s.codeOf(2);
+  const r = s.post({action: 'init', code});
+  assert.equal(r.ok, true);
+  assert.equal(r.data.catalogue.gifts.filter(g => g.enabled).length, 7);
+  assert.equal(r.data.lookup.label, 'Aye Aye & Ko Ko');
+  const bad = s.post({action: 'init', code: 'ZZZZZZZZ'});
+  assert.equal(bad.ok, true);
+  assert.equal(bad.data.catalogue.gifts.length > 0, true);
+  assert.deepEqual([bad.data.lookupError.status, bad.data.lookupError.reason], [404, 'not_found']);
+  const none = s.post({action: 'init'});
+  assert.equal(none.data.lookup, undefined);
+  assert.ok(none.data.catalogue);
+});

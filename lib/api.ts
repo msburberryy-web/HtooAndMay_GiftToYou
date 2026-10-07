@@ -1,7 +1,6 @@
-// Google Apps Script web app (setup/Code.gs). Redeploy as a new version of the same deployment to keep this URL.
-export const GIFT_API_URL: string =
-  import.meta.env.VITE_GIFT_API_URL ||
-  'https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec';
+import {DEFAULT_GIFT_API_URL} from './endpoint';
+
+export const GIFT_API_URL: string = import.meta.env.VITE_GIFT_API_URL || DEFAULT_GIFT_API_URL;
 
 export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'forbidden' | 'service' | 'network';
 
@@ -53,4 +52,15 @@ export function imageFallback(e: {currentTarget: HTMLImageElement}) {
   if (img.src.endsWith(fallback)) return;
   img.removeAttribute('srcset');
   img.src = fallback;
+}
+
+// The early-start request made by index.html before the app loads: the gift list and the guest's details in one trip.
+type BootData = {catalogue: unknown; lookup?: unknown; lookupError?: {status: number; reason: ApiReason; error: string}};
+export function takeBoot(): {code: string; data: Promise<BootData>} | null {
+  const w = window as unknown as {__giftBoot?: {code: string; promise: Promise<{ok?: boolean; data?: BootData}>}};
+  const boot = w.__giftBoot;
+  w.__giftBoot = undefined;
+  if (!boot) return null;
+  // Anything unexpected (e.g. an older Apps Script without "init") falls back to the normal requests.
+  return {code: boot.code, data: boot.promise.then(b => { if (!b || b.ok !== true || !b.data) throw new Error('boot unavailable'); return b.data; })};
 }
