@@ -733,13 +733,13 @@ function guestEmail_(r,language){
  const my=language==='my',code=text_(r[0]);
  const t=my?{
   title:'လက်ဆောင်ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ',hello:'ချစ်လှစွာသော '+invite_(r).label+'၊',
-  intro:'ကျွန်တော်တို့ရဲ့ မင်္ဂလာနေ့ကို လာရောက်ချီးမြှင့်ပေးလို့ ကျေးဇူးအများကြီးတင်ပါတယ်။ သင်ရွေးထားတဲ့ လက်ဆောင်ကို လက်ခံရရှိပါပြီ။ ပွဲပြီးတဲ့နောက် ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။',
+  intro:'ကျွန်တော်တို့ရဲ့ မင်္ဂလာနေ့ကို လာရောက်ချီးမြှင့်ပေးလို့ ကျေးဇူးအများကြီးတင်ပါတယ်။ သင်ရွေးထားတဲ့ လက်ဆောင်ကို လက်ခံရရှိပါပြီ။ ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။',
   order:'မှာယူမှုနံပါတ်',gift:'ရွေးထားသောလက်ဆောင်',deliver:'ပို့ဆောင်ရမည့်နေရာ',recipient:'လက်ခံမည့်သူ',phone:'ဖုန်းနံပါတ်',address:'လိပ်စာ',note:'မှတ်ချက်',when:'အတည်ပြုချိန်',code:'လက်ဆောင်ကုဒ်',
   button:'ကျွန်ုပ်၏လက်ဆောင်ကို ကြည့်ရန်',change:'ပထမဆုံး အတည်ပြုပြီး ၄၈ နာရီအတွင်း၊ ဆိုင်မှာ မမှာယူရသေးလျှင် လက်ဆောင်ကို ပြောင်းလဲနိုင်ပါတယ်။',
   footer:'ဤအီးမေးလ်ကို အလိုအလျောက် ပို့ပေးထားပါသည်။ ပြန်မဖြေပါနှင့်။ မေးမြန်းလိုပါက Htoo သို့မဟုတ် May ကို တိုက်ရိုက် ဆက်သွယ်ပေးပါ။',love:'ချစ်ခြင်းမေတ္တာဖြင့်၊ Htoo & May'
  }:{
   title:'Your gift request is confirmed',hello:'Dear '+invite_(r).label+',',
-  intro:'Thank you for celebrating with us. We have received your gift choice, and we will arrange delivery after the celebration. No payment is required.',
+  intro:'Thank you for celebrating with us. We have received your gift choice, and we will arrange delivery. No payment is required.',
   order:'Order ID',gift:'Your gift',deliver:'Delivering to',recipient:'Recipient',phone:'Phone',address:'Address',note:'Note',when:'Confirmed',code:'Gift code',
   button:'View my gift',change:'You can change your choice within 48 hours of your first confirmation, until it is ordered.',
   footer:'This is an automated confirmation. Please do not reply to this email. For help, contact Htoo or May directly.',love:'With love, Htoo & May'
