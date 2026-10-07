@@ -3,7 +3,7 @@
  * Install in the standalone gift Apps Script project (NOT the RSVP form script).
  * Deploy as a web app: Execute as Me, access Anyone. Keep the same deployment so the /exec URL never changes.
  *
- * Guest actions (no token): catalogue, lookup, submit, track (visits & cart), save (up to 5 saved gifts). A guest can only see or change the record of the code they hold.
+ * Guest actions (no token): init (catalogue + lookup), catalogue, lookup, submit, track (visits & cart), save (up to 5 saved gifts). A guest can only see or change the record of the code they hold.
  * Organiser actions (GIFT_TOKEN required, never put the token in the website): health, state, status.
  */
 // Spreadsheet IDs live in Project Settings › Script properties (GIFT_SHEET_ID, RSVP_SHEET_ID), not in this public file.
@@ -87,6 +87,12 @@ function doPost(e){
   action=String(p.action||'');
   if(action==='catalogue')return output_({ok:true,data:publicCatalogue_()});
   if(action==='lookup')return output_({ok:true,data:lookup_(normalizeCode_(p.code))});
+  // First visit: the gift list and (when a code is given) the guest's details in one request.
+  if(action==='init'){
+   const out={catalogue:publicCatalogue_()};
+   if(p.code){try{out.lookup=lookup_(normalizeCode_(p.code));}catch(error){if(!error.status)throw error;out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
+   return output_({ok:true,data:out});
+  }
   if(action==='submit'){lock=acquireLock_();return output_({ok:true,data:submit_(p)});}
   if(action==='track')return output_({ok:true,data:track_(p)});
   if(action==='save')return output_({ok:true,data:save_(p)});
