@@ -540,3 +540,23 @@ test('speed: without the background trigger (setup not re-run) emails are sent s
   assert.equal(s.mail.length, 1);
   assert.equal(s.notices.length, 1);
 });
+
+test('cart: one gift remembered by ID across visits, replaced when another is added, cleared by ordering', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const code = s.codeOf(2);
+  assert.equal(s.post({action: 'lookup', code}).data.cart, '');
+  s.post({action: 'track', code, event: 'cart', giftId: 'hario-mug'});
+  assert.equal(s.post({action: 'lookup', code}).data.cart, 'hario-mug', 'restored on the next visit (cache refreshed)');
+  s.post({action: 'track', code, event: 'cart', giftId: 'hario-bowls'});
+  assert.equal(s.post({action: 'lookup', code}).data.cart, 'hario-bowls', 'only one gift: replaced');
+  const row = () => s.couples.data.find(r => r[0] === code);
+  assert.equal(row()[23], 'HARIO — Lidded glass bowls · pair', 'sheet keeps the readable name');
+  // renaming the gift in the Catalogue does not lose the cart
+  const cat = s.book.sheets.Catalogue.data; cat.find(r => r[0] === 'hario-bowls')[2] = 'Glass bowls with lids'; s.ctx.onGiftSheetEdit({range: s.book.sheets.Catalogue.getRange(2, 3)});
+  assert.equal(s.post({action: 'lookup', code}).data.cart, 'hario-bowls');
+  s.post({action: 'submit', code, consent: true, data: {gift_id: 'hario-bowls', recipient: 'A', email: 'a@example.com', phone: '090-1234-5678', postal: '1500001', address: 'Tokyo 1-2-3 Room 4', note: ''}});
+  assert.equal(s.post({action: 'lookup', code}).data.cart, '', 'ordering empties the cart');
+  assert.equal(row()[23], '');
+  s.post({action: 'track', code, event: 'cart', giftId: ''});
+  assert.equal(s.post({action: 'lookup', code}).data.cart, '');
+});
