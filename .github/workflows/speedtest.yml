@@ -1,4 +1,4 @@
-# Temporary: times harmless requests to the live Apps Script (public gift list and a made-up code only).
+# Temporary: checks the live Apps Script with harmless requests (public gift list and a made-up code only).
 name: Live speed test
 on:
   push:
@@ -9,10 +9,16 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     steps:
-      - name: Time requests
+      - name: Check requests
         run: |
           U='https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec'
-          t() { curl -sS -L -o body.txt -H 'Content-Type: text/plain' -w "%{time_total}s (redirect %{time_redirect}s, HTTP %{http_code})" "$@" "$U"; echo "  -> $(head -c 90 body.txt)"; }
-          echo "== keep-awake check (GET)"; for i in 1 2 3; do printf "get $i: "; t; done
-          echo "== gift list (catalogue)"; for i in 1 2 3 4 5; do printf "cat $i: "; t --data '{"action":"catalogue"}'; done
-          echo "== first visit with a code (init, made-up code)"; for i in 1 2 3; do printf "init $i: "; t --data '{"action":"init","code":"ZZZZZZZZZZZZ"}'; done
+          step() { # first hop (script runs here), then the redirect target (where the answer is fetched)
+            curl -sS -m 90 -o hop1.txt -D h1.txt -H 'Content-Type: text/plain' -w "hop1 %{http_code} in %{time_total}s" "$@" "$U"
+            loc=$(grep -i '^location:' h1.txt | tr -d '\r' | cut -d' ' -f2)
+            if [ -n "$loc" ]; then curl -sS -m 90 -o hop2.txt -w " | hop2 %{http_code} in %{time_total}s" "$loc"; echo " -> $(head -c 160 hop2.txt | tr '\n' ' ')"; else echo " -> $(head -c 300 hop1.txt | tr '\n' ' ')"; fi
+          }
+          date -u
+          for i in 1 2 3; do printf "GET  $i: "; step; done
+          for i in 1 2 3 4; do printf "CAT  $i: "; step --data '{"action":"catalogue"}'; done
+          for i in 1 2 3; do printf "INIT $i: "; step --data '{"action":"init","code":"ZZZZZZZZZZZZ"}'; done
+          for i in 1 2; do printf "LOOK $i: "; step --data '{"action":"lookup","code":"ZZZZZZZZZZZZ"}'; done
