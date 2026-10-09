@@ -1,10 +1,10 @@
-[
- {"id": "staub-cocotte-pair", "url": "https://uchiiwai.zexy.net/shop/g/g142005/"},
- {"id": "lecreuset-oval-plate", "url": "https://uchiiwai.zexy.net/shop/g/g198037/"},
- {"id": "lecreuset-oval-plate-milpoche", "url": "https://milpoche.jp/Item/Detail/7603107"},
- {"id": "sabon-body-set", "url": "https://uchiiwai.zexy.net/shop/g/g310207/"},
- {"id": "agnesb-face-towels", "url": "https://milpoche.jp/Item/Detail/8049387"},
- {"id": "bodyshop-hand-set", "url": "https://milpoche.jp/Item/Detail/8212145"},
- {"id": "bodyshop-hand-set-zexy", "url": "https://uchiiwai.zexy.net/shop/g/g309061/"},
- {"id": "jillstuart-brand", "url": "https://milpoche.jp/Brand/Items/110", "discover": "タオル|ボヌール"}
-]
+{"items": [
+ {"id": "agnesb-face-towels", "item": "8049387"},
+ {"id": "bodyshop-hand-set", "item": "8212145"},
+ {"id": "jillstuart-bonheur-towel-c", "item": "7606528"},
+ {"id": "lecreuset-oval-plate", "item": "7603107"}
+],
+"discover": [
+ {"url": "https://milpoche.jp/", "match": "Brand|Category|Schoice|キッチン|食器|テーブル"},
+ {"url": "https://milpoche.jp/Schoice/Towel", "match": "Item/Detail"}
+]}
