@@ -6,7 +6,7 @@ def get(url):
     m = re.search(rb'charset=["\']?([\w-]+)', raw[:3000]); return raw.decode(m.group(1).decode() if m else 'utf-8', 'replace')
 def text(s): s = re.sub(r'(?is)<(script|style).*?</\1>', ' ', s); s = re.sub(r'<[^>]+>', ' ', s); return re.sub(r'\s+', ' ', html.unescape(s))
 cfg = json.load(open('.github/scripts/gifts.json'))
-for c in cfg.get('debug', []):
+for c in []:
     pg = get(f'https://milpoche.jp/Category/Items/{c}?lc=1'); links = re.findall(r'/Item/Detail/\d+', pg)
     print('DEBUG cat', c, 'links', len(links), 'len', len(pg)); i = pg.find(links[0]) if links else 0
     print('DEBUG raw', re.sub(r'\s+', ' ', pg[max(0, i-300):i+1500])); os.makedirs('product-photos', exist_ok=True)
@@ -28,17 +28,10 @@ for g in cfg['items']:
     print('ITEM', g['id'], '| price', price.group(1) if price else '-', '|', stock, '|', msg)
 seen = set()
 for c in cfg.get('categories', []):
-    for pg in (1, 2, 3):
-        url = f'https://milpoche.jp/Category/Items/{c}?lc=1&pg={pg}'
-        try: page = get(url)
-        except Exception as e: print('CAT', c, pg, 'ERROR', e); break
-        found = 0
-        for m in re.finditer(r'(?is)<a[^>]+href="(/Item/Detail/(\d+))"[^>]*>(.*?)</a>', page):
-            code = m.group(2); found += 1
-            if code in seen: continue
-            window = text(page[m.start():m.start() + 1500]); name = text(m.group(3)).strip()
-            pm = re.search(r'税込\s*([\d,]+)\s*円', window)
-            if not pm: continue
-            yen = int(pm.group(1).replace(',', ''))
-            if 2750 <= yen <= 3500 and name: seen.add(code); print(f'CAND cat{c} {yen:>5} https://milpoche.jp/Item/Detail/{code} | {name[:90]}')
-        if not found: break
+    try: page = get(f'https://milpoche.jp/Category/Items/{c}?lc=1')
+    except Exception as e: print('CAT', c, 'ERROR', e); continue
+    for li in re.findall(r'(?is)<li>\s*<p class="img_r.*?</li>', page):
+        code = re.search(r'/Item/Detail/(\d+)', li); name = re.search(r'class="item_name"[^>]*>(.*?)</a>', li); pm = re.search(r'税込(?:&nbsp;|\s)*([\d,]+)', li)
+        if not (code and name and pm) or code.group(1) in seen: continue
+        yen = int(pm.group(1).replace(',', '')); free = '送料無料' in li
+        if 2750 <= yen <= 3500: seen.add(code.group(1)); print(f"CAND cat{c} {yen} {'FREE' if free else 'paid'} https://milpoche.jp/Item/Detail/{code.group(1)} | {html.unescape(name.group(1)).strip()[:80]}")
