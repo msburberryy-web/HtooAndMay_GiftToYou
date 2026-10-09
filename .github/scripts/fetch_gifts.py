@@ -25,6 +25,8 @@ for g in cfg['items']:
         for old in os.listdir('product-photos'):
             if old.startswith(g['id'] + '.'): os.remove('product-photos/' + old)
         open(f"product-photos/{g['id']}.jpg", 'wb').write(data); msg = f'saved {big[0]} ({len(data)} bytes)'
+    det = ' / '.join(m.group(0) for kw in ['内容', '内容量', '現品サイズ', 'サイズ', '容量', '素材', '材質', '原産国', '箱サイズ', 'ハコサイズ'] for m in [re.search(kw + r'[：:][^ ]{1,90}', t)] if m)
+    print('DETAIL', g['id'], '|', (re.search(r'(?is)<title>(.*?)</title>', page).group(1).strip()[:90]), '|', det)
     print('ITEM', g['id'], '| price', price.group(1) if price else '-', '|', stock, '|', msg)
 seen = set()
 for c in cfg.get('categories', []):
