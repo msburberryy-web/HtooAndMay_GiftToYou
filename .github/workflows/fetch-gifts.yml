@@ -1,0 +1,19 @@
+# Temporary: fetches product photos for new gifts and commits them to this branch for review.
+name: Fetch gift photos
+on:
+  push:
+    branches: ["photos/new-gifts"]
+    paths: [".github/scripts/gifts.json", ".github/scripts/fetch_gifts.py", ".github/workflows/fetch-gifts.yml"]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/scripts/fetch_gifts.py
+      - name: Commit photos
+        run: |
+          git config user.name "github-actions[bot]"; git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add product-photos
+          git diff --cached --quiet || { git commit -m "Add fetched product photos"; git push; }
