@@ -5,7 +5,11 @@ def get(url):
     with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=40) as r: raw = r.read()
     m = re.search(rb'charset=["\']?([\w-]+)', raw[:3000]); return raw.decode(m.group(1).decode() if m else 'utf-8', 'replace')
 def text(s): s = re.sub(r'(?is)<(script|style).*?</\1>', ' ', s); s = re.sub(r'<[^>]+>', ' ', s); return re.sub(r'\s+', ' ', html.unescape(s))
-cfg = json.load(open('.github/scripts/gifts.json')); os.makedirs('product-photos', exist_ok=True)
+cfg = json.load(open('.github/scripts/gifts.json'))
+for c in cfg.get('debug', []):
+    pg = get(f'https://milpoche.jp/Category/Items/{c}?lc=1'); links = re.findall(r'/Item/Detail/\d+', pg)
+    print('DEBUG cat', c, 'links', len(links), 'len', len(pg)); i = pg.find(links[0]) if links else 0
+    print('DEBUG raw', re.sub(r'\s+', ' ', pg[max(0, i-300):i+1500])); os.makedirs('product-photos', exist_ok=True)
 for g in cfg['items']:
     url = 'https://milpoche.jp/Item/Detail/' + g['item']
     try: page = get(url)
