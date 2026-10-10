@@ -1,0 +1,19 @@
+# Temporary: downloads a few existing gift images to use as a style reference.
+name: Fetch style reference
+on:
+  push:
+    branches: ["tmp/style-ref"]
+permissions:
+  contents: write
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p style-ref
+          for f in hario-mug hario-teapot kinto-350-white imabari-wooden-blue hario-bowls lecreuset; do
+            curl -sS -L -m 60 -o style-ref/$f.jpg -w "$f %{http_code} %{size_download}\n" "https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/$f.jpg" || true
+          done
+          git config user.name "github-actions[bot]"; git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git add style-ref; git diff --cached --quiet || { git commit -m "Style reference images"; git push; }
