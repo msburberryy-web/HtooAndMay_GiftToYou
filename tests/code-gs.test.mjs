@@ -609,3 +609,20 @@ test('speed: no pre-load before setup has installed the edit triggers', () => {
   s.ctx.processGiftEmailQueue();
   assert.equal(opened, 0);
 });
+
+test('personal message: RSVPs › Gift message is shown with the guest lookup, edits apply at once', () => {
+  const s = setup();
+  const code = s.codeOf(2), h = s.rsvp.data[0];
+  const mi = h.indexOf('Gift message');
+  assert.ok(mi >= 0, 'setup adds the Gift message column');
+  assert.equal(s.post({action: 'lookup', code}).data.message, '');
+  s.rsvp.data[1][mi] = '  Dear Aye Aye,\r\nThank you for coming!  ';
+  s.ctx.onRsvpSheetEdit({range: s.rsvp.getRange(2, mi + 1)});
+  assert.equal(s.post({action: 'lookup', code}).data.message, 'Dear Aye Aye,\nThank you for coming!');
+  assert.equal(s.post({action: 'init', code}).data.lookup.message, 'Dear Aye Aye,\nThank you for coming!');
+  s.rsvp.data[1][mi] = 'x'.repeat(2000);
+  s.ctx.onRsvpSheetEdit({range: s.rsvp.getRange(2, mi + 1)});
+  assert.equal(s.post({action: 'lookup', code}).data.message.length, 1500);
+  // another couple never sees it
+  assert.equal(s.post({action: 'lookup', code: s.codeOf(3)}).data.message, '');
+});

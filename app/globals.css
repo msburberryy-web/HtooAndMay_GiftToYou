@@ -294,3 +294,23 @@ body{font-family:'Manrope',Arial,sans-serif}
 .your-gift{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:8px 14px;border:1px solid #727b57;border-radius:4px;color:#4f5a38;background:#eef0e3;font-size:14px;white-space:nowrap}
 .changing-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;border:1px solid #b4935d;background:#fffdf8;padding:12px 16px;margin:0 0 18px}
 .changing-banner p{margin:0;font-size:14px;flex:1 1 260px}
+
+/* Personal note gift box (RSVPs › Gift message) */
+.gift-note{margin:14px auto 6px;max-width:420px}
+.gift-note-box{display:flex;flex-direction:column;align-items:center;gap:6px;margin:0 auto;background:none;border:0;padding:4px 8px;cursor:pointer;color:#7c3241;font:inherit;font-size:15px}
+.gift-note-box svg{width:120px;height:110px;overflow:visible}
+.gift-note-box span{text-decoration:underline;text-underline-offset:3px}
+.gift-note-box:focus-visible{outline:2px solid #7c3241;outline-offset:4px;border-radius:8px}
+.gift-note.closed .note-lid{transform-box:fill-box;transform-origin:center bottom;animation:note-wiggle 3s ease-in-out infinite}
+.gift-note .note-sparkles{animation:twinkle 2.2s ease-in-out infinite}
+.gift-note.opening .note-lid{transform-box:fill-box;transform-origin:left bottom;animation:note-lid-off .7s cubic-bezier(.3,.7,.3,1) forwards}
+.gift-note.opening .note-base{transform-box:fill-box;transform-origin:center bottom;animation:note-pop .7s ease-out}
+.gift-note-card{background:#fbf5e9;border:1px solid #b4935d;border-radius:6px;padding:22px 22px 14px;box-shadow:0 10px 30px rgba(124,50,65,.12);text-align:center;animation:note-rise .6s cubic-bezier(.2,.8,.2,1) both;outline:none}
+.gift-note-text{white-space:pre-line;font-family:'Newsreader',Georgia,serif;font-size:19px;line-height:1.6;color:#3f362e;margin:0 0 12px}
+.burmese .gift-note-text{font-family:inherit;font-size:16px;line-height:1.9}
+.gift-note-from{color:#7c3241;font-style:italic;margin:0 0 8px}
+@keyframes note-wiggle{0%,80%,100%{transform:rotate(0)}85%{transform:rotate(-4deg) translateY(-2px)}90%{transform:rotate(3deg) translateY(-2px)}95%{transform:rotate(-2deg)}}
+@keyframes note-lid-off{to{transform:translate(-18px,-34px) rotate(-28deg);opacity:0}}
+@keyframes note-pop{40%{transform:scale(1.05,.95)}100%{transform:none}}
+@keyframes note-rise{from{opacity:0;transform:translateY(18px) scale(.96)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.gift-note *,.gift-note-card{animation:none!important}}

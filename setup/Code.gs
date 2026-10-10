@@ -42,6 +42,8 @@ const ORDERED_MISMATCH_FORMULA = '=AND($AC2<>"",$AC2<>$AA2)';
 const ORDERS_TAB = 'Order history';
 const ORDER_HEADERS = ['Order ID','Type','Shared code','Couple','Gift ID','Gift','Recipient','Email','Phone','Postcode','Address','Delivery note','Language','Submitted at','Replaces','Superseded by'];
 const GIFT_MAX_SAVED = 5;
+// RSVPs › Gift message: a personal note for each couple, shown when they open the gift box on their page.
+const GIFT_MESSAGE_MAX = 1500;
 // The guest list (RSVPs) is cached for an hour to make code checks fast. Unknown codes always re-read the sheet,
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
 const GIFT_REGISTRY_CACHE_SECONDS = 3600;
@@ -122,7 +124,7 @@ function cacheState_(){
  return cacheState__;
 }
 function cacheKey_(name){return name+'-g'+cacheState_().gen;}
-function lookupKey_(code){return cacheKey_('lookup-v1-'+code);}
+function lookupKey_(code){return cacheKey_('lookup-v2-'+code);}
 function forgetLookup_(code){try{CacheService.getScriptCache().remove(lookupKey_(code));}catch(ignore){}}
 // Any manual sheet edit: start a new cache generation (all cached answers are ignored from now on).
 function bumpCacheGen_(){
@@ -181,7 +183,7 @@ function lookup_(code){
  return value;
 }
 function lookupValue_(entry,row,cart){
- return {label:entry.label,selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
+ return {label:entry.label,message:entry.message||'',selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
 }
 // Pre-load: keeps the gift list, the guest list and every couple's (partly hidden) details ready in the cache, so a
 // guest's code check rarely has to open a spreadsheet. Runs with the every-minute email helper; when everything is
@@ -191,7 +193,7 @@ function warmGiftCache_(){
  cacheState__=null;
  if(cacheState_().seconds!==GIFT_LONG_CACHE_SECONDS)return; // only once the edit triggers keep the cache correct
  const cache=CacheService.getScriptCache();
- const regKey=cacheKey_('registry-v2'),catKey=cacheKey_('catalogue-v3');
+ const regKey=cacheKey_('registry-v3'),catKey=cacheKey_('catalogue-v3');
  const have=cache.getAll([regKey,catKey]);
  let registry=have[regKey]?new Map(JSON.parse(have[regKey])):null;
  if(!have[catKey])publicCatalogue_();
@@ -436,7 +438,7 @@ function syncRsvp_(sheet,registry){registry.forEach(entry=>ensureCoupleRow_(shee
 
 // Cached guest list for fast code checks. A code missing from the cache is re-checked against the sheet.
 function registryEntry_(code){
- const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v2'),hit=cache.get(key);
+ const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v3'),hit=cache.get(key);
  if(hit){const entry=new Map(JSON.parse(hit)).get(code);if(entry)return entry;}
  const registry=rsvpRegistry_(),json=JSON.stringify(Array.from(registry.entries()));
  if(json.length<90000)cache.put(key,json,cacheState_().seconds===GIFT_LONG_CACHE_SECONDS?GIFT_LONG_CACHE_SECONDS:GIFT_REGISTRY_CACHE_SECONDS);
@@ -451,7 +453,7 @@ function rsvpRegistry_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw fault_('RSVPs tab not found.',503,'service');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)');
+ const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)'),mi=headers.indexOf('Gift message');
  if(ci<0||ai<0)throw fault_('Run setupGiftStandalone to add the Gift code column to RSVPs.',503,'service');
  const rows=sh.getLastRow()<2?[]:sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues();
  const result=new Map(),duplicates=new Set();
@@ -466,7 +468,9 @@ function rsvpRegistry_(){
   const names=override?[override]:[main,gi>=0?text_(r[gi]):''].filter(Boolean);
   const unique=names.filter((name,index)=>names.findIndex(n=>key_(n)===key_(name))===index).slice(0,2);
   if(result.has(code)){duplicates.add(code);return;}
-  result.set(code,{code,names:unique,label:unique.join(' & ')});
+  // Optional personal note shown in the gift box at the top of the guest's page (line breaks kept).
+  const message=mi>=0?String(r[mi]==null?'':r[mi]).replace(/\r\n?/g,'\n').trim().slice(0,GIFT_MESSAGE_MAX):'';
+  result.set(code,{code,names:unique,label:unique.join(' & '),message});
  });
  // A code on two rows is ambiguous: block it until the organiser fixes the RSVP sheet.
  duplicates.forEach(code=>{console.warn('Gift code '+code+' appears on more than one RSVP row and is blocked.');result.delete(code);});
@@ -476,7 +480,7 @@ function ensureRsvpColumns_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw new Error('RSVPs tab not found.');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- ['Gift code','Gift display name','Gift QR link','Gift enabled'].forEach(name=>{
+ ['Gift code','Gift display name','Gift QR link','Gift enabled','Gift message'].forEach(name=>{
   if(name==='Gift code'&&codeColumn_(headers)>=0)return;
   if(headers.indexOf(name)>=0)return;
   const column=headers.length+1;if(column>sh.getMaxColumns())sh.insertColumnsAfter(sh.getMaxColumns(),1);

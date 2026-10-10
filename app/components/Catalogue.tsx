@@ -6,6 +6,7 @@ import {Checkbox} from '@/components/ui/checkbox';
 import {Check,CheckCircle2,Heart,ShoppingBag} from 'lucide-react';
 import OrderStatus from './OrderStatus';
 import StatusScene from './StatusScene';
+import GiftNote from './GiftNote';
 import {ApiError,callGiftApi,giftImage,imageFallback,takeBoot} from '@/lib/api';
 import {forgetGuest,readCatalogue,readGuest,writeCatalogue,writeGuest} from '@/lib/guest-cache';
 type Selection={masked?:boolean;order_id?:string;gift_id:string;gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;first_submitted_at?:string};
@@ -14,7 +15,7 @@ const empty={recipient:'',email:'',phone:'',postal:'',address:'',note:''};
 // Short technical reference shown under service errors, to help the organiser diagnose problems.
 const errorRef=(action:string,e:unknown)=>e instanceof ApiError?`Ref: ${action} · ${e.reason}${e.status?' '+e.status:''} · ${e.message}`:`Ref: ${action} · ${e instanceof Error?e.message:'error'}`;
 const MAX_SAVED=5;
-type LookupData={label:string;selection:Selection|null;saved?:string[];cart?:string};
+type LookupData={label:string;message?:string;selection:Selection|null;saved?:string[];cart?:string};
 const prepareConfig=(d:Config):Config=>({...d,gifts:d.gifts.map(g=>({...g,...giftImage(g.image)}))});
 type Field='recipient'|'email'|'phone'|'postal'|'address'|'consent';
 const FIELD_ORDER:Field[]=['recipient','email','phone','postal','address','consent'];
@@ -24,14 +25,14 @@ const hasPendingCode=()=>{try{return /^#code=[A-Za-z0-9]{6,40}/.test(window.loca
 const pickForm=(f:typeof empty)=>({recipient:f.recipient,email:f.email,phone:f.phone,postal:f.postal,address:f.address,note:f.note});
 export default function Catalogue(){
  const [lang,setLang]=useState<'en'|'my'>('en'),[config,setConfig]=useState<Config>(defaultConfig),[loaded,setLoaded]=useState(false),[loadError,setLoadError]=useState(''),[category,setCategory]=useState('All gifts');
- const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[pendingCart,setPendingCart]=useState<string|null>(null),[cartNote,setCartNote]=useState(''),[changing,setChanging]=useState(false),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
+ const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[message,setMessage]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[pendingCart,setPendingCart]=useState<string|null>(null),[cartNote,setCartNote]=useState(''),[changing,setChanging]=useState(false),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
  const toastTimer=useRef<number|undefined>(undefined);
  function notify(message:string){setToast(message);window.clearTimeout(toastTimer.current);toastTimer.current=window.setTimeout(()=>setToast(''),2400)}
  const saveSeq=useRef(0);
  const cartRestored=useRef(false);
  const t=giftCopy[lang];
  const ended=!!config.deadline&&Date.now()>new Date(config.deadline+'T23:59:59+09:00').getTime();
- function resetGuest(){setChanging(false);if(verified)void forgetGuest(verified);setVerified('');setLabel('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
+ function resetGuest(){setChanging(false);if(verified)void forgetGuest(verified);setVerified('');setLabel('');setMessage('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
  function guestError(e:unknown){if(!(e instanceof ApiError))return `${t.serviceError} (${errorRef('request',e)})`;switch(e.reason){case 'not_found':return t.invalidCode;case 'invalid':return t.invalidDetails;case 'locked':return t.cannotChange;case 'closed':return t.closed;case 'ended':return t.ended;case 'unavailable':return t.giftUnavailable;case 'limit':return t.saveLimit;default:return `${t.serviceError} (${errorRef('request',e)})`;}}
  // Show the remembered gift list at once, then refresh it from Google in the background.
  function load(early?:Promise<Config>){setLoadError('');const cached=readCatalogue<Config>();if(cached){setConfig(prepareConfig(cached));setLoaded(true)}
@@ -40,7 +41,7 @@ export default function Catalogue(){
  async function lookup(value=code,showExisting=false,early?:Promise<LookupData>){
   setError('');const normalized=value.replace(/[\s-]/g,'').toUpperCase();
   const refreshing=verified===normalized;
-  const apply=(d:LookupData,keepForm:boolean)=>{setPendingCart(d.cart??'');setSaved(d.saved??[]);setLabel(d.label);setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
+  const apply=(d:LookupData,keepForm:boolean)=>{setPendingCart(d.cart??'');setSaved(d.saved??[]);setLabel(d.label);setMessage(d.message??'');setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
   const cached=showExisting||refreshing?null:await readGuest<LookupData>(normalized);
   if(cached){apply(cached,false);setOpening(false)}
   setBusy(!cached);
@@ -138,7 +139,7 @@ export default function Catalogue(){
   {!locked&&changeCloses&&<div className="change-box"><p>{t.changeUntil.replace('{time}',changeCloses)}</p><button type="button" className="outline" onClick={()=>{setChanging(true);setCategory('All gifts');goShop(true)}}>{t.changeGift}</button></div>}
  </>:<div className="saved-empty" role="status"><p>{busy||opening?t.checking:t.noSelection}</p>{!busy&&!opening&&<button type="button" className="primary" onClick={()=>goShop(true)}>{t.continue}</button>}</div>}
  </section>:<><section className="intro">{monogram}<p className="date">16 October 2026</p><h1>{t.title}</h1><p>{t.intro}</p></section>
- <section className="guest-access" aria-label={t.code}>{opening&&!label?<div className="guest-welcome opening" role="status"><div className="opening-dots" aria-hidden="true"><span/><span/><span/></div><p>{t.opening}</p></div>:label?<div className="guest-welcome"><p>{t.welcome}</p><h2>{label}</h2><p>{locked?t.locked:selection?t.savedChoice:t.ready}</p>{selection&&<button className="outline welcome-order" onClick={openOrder}>{t.viewOrder}{selection.order_id?` · ${selection.order_id}`:''}</button>}<button className="text-button" disabled={busy} onClick={resetGuest}>{t.switchCode}</button></div>:<form onSubmit={e=>{e.preventDefault();void lookup()}}><label htmlFor="gift-code">{t.code}</label><div className="code-row"><input id="gift-code" required autoCapitalize="characters" autoComplete="off" maxLength={40} value={code} onChange={e=>setCode(e.target.value.toUpperCase())}/><button className="primary" disabled={busy}>{busy?t.checking:t.check}</button></div><p className="fine">{t.codeHelp}</p></form>}{error&&!panel&&<p className="error" role="alert">{error}</p>}</section>
+ <section className="guest-access" aria-label={t.code}>{opening&&!label?<div className="guest-welcome opening" role="status"><div className="opening-dots" aria-hidden="true"><span/><span/><span/></div><p>{t.opening}</p></div>:label?<div className="guest-welcome"><p>{t.welcome}</p><h2>{label}</h2>{message&&<GiftNote key={verified} message={message} tap={t.noteTap} close={t.noteClose} from={t.thanks}/>}<p>{locked?t.locked:selection?t.savedChoice:t.ready}</p>{selection&&<button className="outline welcome-order" onClick={openOrder}>{t.viewOrder}{selection.order_id?` · ${selection.order_id}`:''}</button>}<button className="text-button" disabled={busy} onClick={resetGuest}>{t.switchCode}</button></div>:<form onSubmit={e=>{e.preventDefault();void lookup()}}><label htmlFor="gift-code">{t.code}</label><div className="code-row"><input id="gift-code" required autoCapitalize="characters" autoComplete="off" maxLength={40} value={code} onChange={e=>setCode(e.target.value.toUpperCase())}/><button className="primary" disabled={busy}>{busy?t.checking:t.check}</button></div><p className="fine">{t.codeHelp}</p></form>}{error&&!panel&&<p className="error" role="alert">{error}</p>}</section>
  
  <details id="guide" className="order-guide"><summary>{t.guide}</summary><ol>{t.steps.map((s,i)=><li key={i}><span>{String(i+1).padStart(2,'0')}</span><p>{s}</p></li>)}</ol></details>
  {!config.open&&loaded&&<div className="draft-note">{t.preview}</div>}
