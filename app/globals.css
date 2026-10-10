@@ -314,3 +314,20 @@ body{font-family:'Manrope',Arial,sans-serif}
 @keyframes note-pop{40%{transform:scale(1.05,.95)}100%{transform:none}}
 @keyframes note-rise{from{opacity:0;transform:translateY(18px) scale(.96)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.gift-note *,.gift-note-card{animation:none!important}}
+
+/* Secondary actions (View gift, Remove, Use another code, Back, Close…) look like buttons, not body text:
+   a soft outlined pill with hover and press feedback. Body text stays plain; links in sentences stay underlined. */
+.text-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:6px 16px;border:1px solid #b4935d;border-radius:999px;background:#fbf5e9;color:#7c3241;font-size:14px;font-weight:500;line-height:1.2;text-decoration:none;cursor:pointer;box-shadow:0 1px 0 rgba(124,50,65,.08);transition:background-color .15s,border-color .15s,transform .1s,box-shadow .15s;-webkit-tap-highlight-color:transparent}
+.text-button:hover:not(:disabled){background:#f3e7d3;border-color:#7c3241}
+.text-button:active:not(:disabled){transform:scale(.96);background:#ead9c1;box-shadow:inset 0 1px 2px rgba(124,50,65,.18)}
+.text-button:focus-visible{outline:2px solid #7c3241;outline-offset:2px}
+.text-button:disabled{opacity:.5;cursor:default}
+.gift-actions .text-button{font-size:14px}
+.back-link{margin:8px 0 12px}
+.guest-welcome .text-button{margin-top:10px}
+/* Gift note: the "tap to open" label is a filled pill under the box; the whole box stays tappable */
+.gift-note-box span{display:inline-flex;align-items:center;min-height:36px;padding:6px 18px;border-radius:999px;background:#7c3241;color:#fbf5e9;font-size:14px;text-decoration:none;box-shadow:0 2px 6px rgba(124,50,65,.2);transition:transform .1s,background-color .15s}
+.gift-note-box:hover span{background:#662736}
+.gift-note-box:active span{transform:scale(.96)}
+.gift-note-box:active svg{transform:scale(.97);transition:transform .1s}
+@media(prefers-reduced-motion:reduce){.text-button,.gift-note-box span{transition:none}.text-button:active:not(:disabled),.gift-note-box:active span{transform:none}}
