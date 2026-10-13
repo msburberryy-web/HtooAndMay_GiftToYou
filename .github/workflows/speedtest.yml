@@ -1,4 +1,4 @@
-# Temporary: checks whether the live script returns a gift message (prints only field names and lengths, no personal data).
+# Temporary: checks whether the live script returns a gift message (prints only field names and lengths, no personal data). Run 2.
 name: Live speed test
 on:
   push:
