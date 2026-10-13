@@ -1,4 +1,4 @@
-# Temporary: checks the live Apps Script with harmless requests (public gift list and a made-up code only).
+# Temporary: checks whether the live script returns a gift message (prints only field names and lengths, no personal data).
 name: Live speed test
 on:
   push:
@@ -9,16 +9,15 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     steps:
-      - name: Check requests
+      - name: Check message field
         run: |
           U='https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec'
-          step() { # first hop (script runs here), then the redirect target (where the answer is fetched)
-            curl -sS -m 90 -o hop1.txt -D h1.txt -H 'Content-Type: text/plain' -w "hop1 %{http_code} in %{time_total}s" "$@" "$U"
-            loc=$(grep -i '^location:' h1.txt | tr -d '\r' | cut -d' ' -f2)
-            if [ -n "$loc" ]; then curl -sS -m 90 -o hop2.txt -w " | hop2 %{http_code} in %{time_total}s" "$loc"; echo " -> $(head -c 160 hop2.txt | tr '\n' ' ')"; else echo " -> $(head -c 300 hop1.txt | tr '\n' ' ')"; fi
-          }
-          date -u
-          for i in 1 2 3; do printf "GET  $i: "; step; done
-          for i in 1 2 3 4; do printf "CAT  $i: "; step --data '{"action":"catalogue"}'; done
-          for i in 1 2 3; do printf "INIT $i: "; step --data '{"action":"init","code":"ZZZZZZZZZZZZ"}'; done
-          for i in 1 2; do printf "LOOK $i: "; step --data '{"action":"lookup","code":"ZZZZZZZZZZZZ"}'; done
+          for a in lookup init; do
+            curl -sS -L -m 90 -H 'Content-Type: text/plain' --data "{\"action\":\"$a\",\"code\":\"E1FC7462A5DA4CBC9B42\"}" "$U" -o r.json
+            python3 - "$a" <<'PY'
+          import json,sys
+          r=json.load(open('r.json')); a=sys.argv[1]
+          d=r.get('data') or {}; d=d.get('lookup',d) if a=='init' else d
+          print(a, 'ok=',r.get('ok'), 'status=',r.get('status'), 'reason=',r.get('reason'), 'keys=',sorted(d.keys()) if isinstance(d,dict) else '-', 'has message field=', isinstance(d,dict) and 'message' in d, 'message length=', len(d.get('message') or '') if isinstance(d,dict) else '-')
+          PY
+          done
