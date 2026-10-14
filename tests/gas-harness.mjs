@@ -96,7 +96,7 @@ export function setup(opts = {}) {
   const post = body => { const r = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text); if (body.action === 'submit' && !opts.noQueueRun) ctx.processGiftEmailQueue(); return r; };
   const header = rsvp.data[0];
   const codeIndex = header.indexOf('Shared code');
-  const codeOf = row => rsvp.data[row - 1][codeIndex];
+  const codeOf = row => String(rsvp.data[row - 1][codeIndex]).replace(/[\s-]/g, '');
   const setSetting = (key, value) => { const s = book.sheets['Gift settings']; const r = s.data.findIndex(x => x[0] === key); s.data[r][1] = value; ctx.refreshCatalogueNow(); };
   return {ctx, books, book, rsvp, couples, props, mail, notices, triggers, post, codeOf, codeIndex, setSetting};
 }
