@@ -331,3 +331,7 @@ body{font-family:'Manrope',Arial,sans-serif}
 .gift-note-box:active span{transform:scale(.96)}
 .gift-note-box:active svg{transform:scale(.97);transition:transform .1s}
 @media(prefers-reduced-motion:reduce){.text-button,.gift-note-box span{transition:none}.text-button:active:not(:disabled),.gift-note-box:active span{transform:none}}
+
+/* Under the couple's names: a quiet check that the card belongs to them */
+.guest-welcome .not-you{margin:2px 0 4px;font-size:13px;color:#6f6257;font-style:italic}
+.burmese .guest-welcome .not-you{font-style:normal}
