@@ -9,7 +9,8 @@ const delivery = {gift_id: 'hario-mug', recipient: 'Aye Aye', email: 'aye@exampl
 test('setup creates tabs and issues codes with QR links', () => {
   const s = setup();
   assert.ok(s.book.sheets.Catalogue && s.book.sheets['Gift settings']);
-  assert.match(s.codeOf(2), /^[A-F0-9]{20}$/);
+  assert.match(s.codeOf(2), /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/);
+  assert.match(s.rsvp.data[1][s.rsvp.data[0].indexOf('Shared code')], /^[2-9A-Z]{5}-[2-9A-Z]{5}$/, 'shown in the sheet as two groups of five');
   assert.notEqual(s.codeOf(2), s.codeOf(3));
   assert.equal(s.rsvp.data[1][s.rsvp.data[0].indexOf('Gift QR link')], 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou/#code=' + s.codeOf(2));
   assert.equal(s.couples.data[0][19], 'First submitted at');
@@ -306,7 +307,7 @@ test('checkGiftSetup warns about short, guessable codes', () => {
   s.rsvp.data.push(row);
   const lines = []; s.ctx.console.log = m => lines.push(m);
   s.ctx.checkGiftSetup();
-  assert.ok(lines.some(l => l.startsWith('⚠️ 1 code(s) are shorter than 12')), lines.join('\n'));
+  assert.ok(lines.some(l => l.startsWith('⚠️ 1 code(s) are shorter than 10')), lines.join('\n'));
 });
 
 test('order history: every new or changed request is its own line with an order ID', () => {
@@ -449,8 +450,8 @@ test('issueGiftCodesForAllGuests: codes for every named row, existing codes kept
   const lines = []; s.ctx.console.log = m => lines.push(m);
   s.ctx.issueGiftCodesForAllGuests();
   assert.equal(s.codeOf(2), before2, 'existing code kept');
-  assert.match(s.codeOf(4), /^[A-F0-9]{20}$/, 'row 4 (declined, named) gets a code');
-  assert.match(s.codeOf(declined), /^[A-F0-9]{20}$/);
+  assert.match(s.codeOf(4), /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/, 'row 4 (declined, named) gets a code');
+  assert.match(s.codeOf(declined), /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/);
   assert.equal(s.codeOf(5), '', 'row without any name gets nothing');
   assert.equal(s.codeOf(shortRow), 'TEST01');
   assert.equal(s.rsvp.data[declined - 1][h.indexOf('Gift QR link')], 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou/#code=' + s.codeOf(declined));
@@ -625,4 +626,34 @@ test('personal message: RSVPs › Gift message is shown with the guest lookup, e
   assert.equal(s.post({action: 'lookup', code}).data.message.length, 1500);
   // another couple never sees it
   assert.equal(s.post({action: 'lookup', code: s.codeOf(3)}).data.message, '');
+});
+
+test('codes: 10 characters, no look-alike characters, typed with or without the dash', () => {
+  const s = setup();
+  const shown = s.rsvp.data[1][s.rsvp.data[0].indexOf('Shared code')];
+  for (const typed of [shown, shown.replace('-', ''), shown.toLowerCase(), shown.replace('-', ' ')])
+    assert.equal(s.post({action: 'lookup', code: typed}).data.label, 'Aye Aye & Ko Ko', typed);
+  const many = new Set(); const seen = new Set();
+  for (let i = 0; i < 400; i++) { const c = s.ctx.newGiftCode_(many); many.add(c); for (const ch of c) seen.add(ch); }
+  assert.equal(many.size, 400, 'no duplicates');
+  assert.ok(![...seen].some(ch => '01OIL'.includes(ch)), 'no 0, 1, O, I, L');
+  assert.equal(seen.size, 31, 'every allowed character is used');
+});
+
+test('guessing protection: too many wrong codes pause code checks and email the organiser once', () => {
+  const s = setup();
+  const good = s.codeOf(2);
+  for (let i = 0; i < 59; i++) assert.equal(s.post({action: 'lookup', code: 'WRONGCODE' + String(i).padStart(2, '0')}).reason, 'not_found');
+  assert.equal(s.post({action: 'lookup', code: good}).ok, true, 'still working below the limit');
+  assert.equal(s.post({action: 'init', code: 'WRONGCODE99'}).data.lookupError.reason, 'not_found');
+  const paused = s.post({action: 'lookup', code: good});
+  assert.deepEqual([paused.ok, paused.status, paused.reason], [false, 429, 'limited']);
+  const init = s.post({action: 'init', code: good});
+  assert.equal(init.ok, true, 'the gift list still loads');
+  assert.equal(init.data.lookupError.reason, 'limited');
+  s.post({action: 'lookup', code: 'WRONGAGAIN1'});
+  assert.equal(s.notices.filter(m => /Many wrong gift codes/.test(m.subject)).length, 1, 'one email to the organiser');
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.checkGiftSetup();
+  assert.ok(lines.some(l => /Wrong codes tried today: 6\d/.test(l)), lines.join('\n'));
 });

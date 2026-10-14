@@ -44,6 +44,12 @@ const ORDER_HEADERS = ['Order ID','Type','Shared code','Couple','Gift ID','Gift'
 const GIFT_MAX_SAVED = 5;
 // RSVPs › Gift message: a personal note for each couple, shown when they open the gift box on their page.
 const GIFT_MESSAGE_MAX = 1500;
+// Gift codes: 10 random characters shown as two groups of five (K7QM2-XH4PA). No look-alike characters (0/O, 1/I/L).
+const GIFT_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const GIFT_CODE_LENGTH = 10;
+// Guessing protection: when more than this many wrong codes are tried within 10 minutes (from anyone),
+// code checks pause until the 10 minutes are over and the organiser gets one email.
+const GIFT_WRONG_CODE_LIMIT = 60;
 // The guest list (RSVPs) is cached for an hour to make code checks fast. Unknown codes always re-read the sheet,
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
 const GIFT_REGISTRY_CACHE_SECONDS = 3600;
@@ -88,11 +94,13 @@ function doPost(e){
   if(!p||typeof p!=='object')throw fault_('Invalid request.',400,'invalid');
   action=String(p.action||'');
   if(action==='catalogue')return output_({ok:true,data:publicCatalogue_()});
+  if(action==='lookup'&&codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
   if(action==='lookup')return output_({ok:true,data:lookup_(normalizeCode_(p.code))});
   // First visit: the gift list and (when a code is given) the guest's details in one request.
   if(action==='init'){
    const out={catalogue:publicCatalogue_()};
-   if(p.code){try{out.lookup=lookup_(normalizeCode_(p.code));}catch(error){if(!error.status)throw error;out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
+   if(p.code&&codeChecksPaused_())out.lookupError={status:429,reason:'limited',error:'Too many codes were tried. Please wait a few minutes and try again.'};
+   else if(p.code){try{out.lookup=lookup_(normalizeCode_(p.code));}catch(error){if(!error.status)throw error;if(error.reason==='not_found')noteWrongCode_();out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
    return output_({ok:true,data:out});
   }
   if(action==='submit'){lock=acquireLock_();return output_({ok:true,data:submit_(p)});}
@@ -102,6 +110,7 @@ function doPost(e){
   throw fault_('Unknown action.',400,'invalid');
  }catch(error){
   // Shows in Apps Script › Executions (open the doPost row) so failed requests can be diagnosed.
+  if(error.reason==='not_found')noteWrongCode_();
   if(error.status)console.warn('doPost '+(action||'?')+' refused: '+error.status+' '+(error.reason||'')+' — '+error.message);
   else console.error('doPost '+(action||'?')+' failed: '+(error.stack||error));
   return output_({ok:false,status:error.status||503,reason:error.reason||'service',error:error.status?error.message:'The sheet could not save this request. Please retry with the same code.'});
@@ -632,10 +641,9 @@ function issueGiftCodesForAllGuests(){
    let code=text_(r[ci]).replace(/[\s-]/g,'').toUpperCase();
    if(!code){
     if(!named)return;
-    do{code=Utilities.getUuid().replace(/-/g,'').slice(0,20).toUpperCase();}while(existing.has(code));
-    existing.add(code);issued++;
-    sh.getRange(row,ci+1).setValue(code);
-   }else if(code.length<12)short.push(row);
+    code=newGiftCode_(existing);existing.add(code);issued++;
+    sh.getRange(row,ci+1).setNumberFormat('@').setValue(displayCode_(code));
+   }else if(code.length<GIFT_CODE_LENGTH)short.push(row);
    const link=GIFT_ORIGIN+'/#code='+code;
    if(qi>=0&&text_(r[qi])!==link)sh.getRange(row,qi+1).setValue(link);
   });
@@ -659,15 +667,15 @@ function issueCodesForRows_(sh,headers,numbers){
   const at=' (RSVP row '+numbers[i]+')';
   if(!/^yes/i.test(text_(r[col('Attending')]))||(!text_(r[col('Name')])&&!text_(r[col('Gift display name')])))throw new Error('Use attending guest rows with a name. For a shifted-name row, fill Gift display name first.'+at);
   if(Number(r[col('Party size')])>1&&!text_(r[col('Guest name(s)')])&&!text_(r[col('Gift display name')]))throw new Error('For a party of two without a second name, fill Gift display name with the couple name first.'+at);
-  if(r[ci-1]&&!/^[A-Z0-9]{6,40}$/.test(text_(r[ci-1]).toUpperCase()))throw new Error('An existing code is invalid.'+at);
+  if(r[ci-1]&&!/^[A-Z0-9]{6,40}$/.test(text_(r[ci-1]).replace(/[\s-]/g,'').toUpperCase()))throw new Error('An existing code is invalid.'+at);
  });
- const all=sh.getRange(2,ci,Math.max(1,sh.getLastRow()-1),1).getValues().map(r=>text_(r[0]).toUpperCase()).filter(Boolean);
+ const all=sh.getRange(2,ci,Math.max(1,sh.getLastRow()-1),1).getValues().map(r=>text_(r[0]).replace(/[\s-]/g,'').toUpperCase()).filter(Boolean);
  if(new Set(all).size!==all.length)throw new Error('Duplicate gift codes already exist in RSVPs. Fix them first.');
  const existing=new Set(all);
  rows.forEach((r,i)=>{
-  let code=text_(r[ci-1]).toUpperCase();
-  if(!code){do{code=Utilities.getUuid().replace(/-/g,'').slice(0,20).toUpperCase();}while(existing.has(code));existing.add(code);}
-  sh.getRange(numbers[i],ci).setNumberFormat('@').setValue(code);
+  let code=text_(r[ci-1]).replace(/[\s-]/g,'').toUpperCase();
+  if(!code){code=newGiftCode_(existing);existing.add(code);}
+  sh.getRange(numbers[i],ci).setNumberFormat('@').setValue(displayCode_(code));
   if(qi>0)sh.getRange(numbers[i],qi).setValue(GIFT_ORIGIN+'/#code='+code);
  });
  SpreadsheetApp.flush();
@@ -691,8 +699,10 @@ function checkGiftSetup(){
   const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
   const missing=['Name','Attending'].filter(h=>headers.indexOf(h)<0).concat(codeColumn_(headers)<0?['Gift code']:[]);
   if(missing.length)throw new Error('Missing columns: '+missing.join(', '));
-  const registry=rsvpRegistry_(),short=Array.from(registry.keys()).filter(c=>c.length<12);
-  if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than 12 characters and could be guessed. Clear those code cells in RSVPs and run issueGiftCodesForAllGuests to replace them.');
+  const registry=rsvpRegistry_(),short=Array.from(registry.keys()).filter(c=>c.length<GIFT_CODE_LENGTH);
+  if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than '+GIFT_CODE_LENGTH+' characters and could be guessed. Clear those code cells in RSVPs and run issueGiftCodesForAllGuests to replace them.');
+  const wrong=Number(PropertiesService.getScriptProperties().getProperty('WRONG_CODES_'+japanDay_()))||0;
+  if(wrong)console.log('ℹ️ Wrong codes tried today: '+wrong+'.');
   return registry.size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
  });
  step('Couples tab (Gift Manager)',()=>{
@@ -850,6 +860,43 @@ function notifyOrganiser_(r,previous,guestEmailStatus){
 
 /* ───────────── Helpers ───────────── */
 
+// A new random code that is not already used. Utilities.getUuid() is Google's secure random source.
+function newGiftCode_(existing){
+ let code;
+ do{
+  code='';
+  while(code.length<GIFT_CODE_LENGTH){
+   const hex=Utilities.getUuid().replace(/-/g,'');
+   for(let i=0;i+1<hex.length&&code.length<GIFT_CODE_LENGTH;i+=2){
+    const b=parseInt(hex.substr(i,2),16);
+    if(i===12||i===16)continue; // UUID version/variant bytes are not random
+    if(b<248)code+=GIFT_CODE_ALPHABET[b%31]; // 248 = 8 × 31 keeps every character equally likely
+   }
+  }
+ }while(existing.has(code));
+ return code;
+}
+function displayCode_(code){return code.length===10?code.slice(0,5)+'-'+code.slice(5):code;}
+function japanDay_(){return Utilities.formatDate(new Date(),GIFT_TIME_ZONE,'yyyy-MM-dd');}
+// Guessing protection (see GIFT_WRONG_CODE_LIMIT). Apps Script cannot see who is asking, so the limit is shared.
+function wrongCodeBucket_(){return 'wrong-codes-'+Math.floor(Date.now()/600000);}
+function codeChecksPaused_(){
+ const n=Number(CacheService.getScriptCache().get(wrongCodeBucket_()))||0;
+ return n>=GIFT_WRONG_CODE_LIMIT;
+}
+function noteWrongCode_(){
+ try{
+  const cache=CacheService.getScriptCache(),key=wrongCodeBucket_(),n=(Number(cache.get(key))||0)+1;
+  cache.put(key,String(n),900);
+  const props=PropertiesService.getScriptProperties(),day='WRONG_CODES_'+japanDay_();
+  props.setProperty(day,String((Number(props.getProperty(day))||0)+1));
+  if(n===GIFT_WRONG_CODE_LIMIT&&!cache.get(key+'-mailed')){
+   cache.put(key+'-mailed','1',900);
+   MailApp.sendEmail({to:organiserEmails_().join(','),subject:'[Gift] Many wrong gift codes were tried',
+    body:'More than '+GIFT_WRONG_CODE_LIMIT+' wrong gift codes were tried on the gift page in the last 10 minutes, so code checks are paused for up to 10 minutes. Guests who already opened the page are not affected.\n\nIf this keeps happening, someone may be trying to guess codes. Codes are 10 random characters, so guessing one is extremely unlikely. If you are worried about a particular couple, clear their code in RSVPs and run issueGiftCodesForAllGuests to give them a new one.'});
+  }
+ }catch(error){console.warn('Wrong-code counter: '+(error.message||error));}
+}
 function normalizeCode_(v){
  const code=text_(v).replace(/[\s-]/g,'').toUpperCase();
  if(!/^[A-Z0-9]{6,40}$/.test(code))throw fault_('We could not find that shared gift code. Please check your card.',404,'not_found');

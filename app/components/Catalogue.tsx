@@ -33,14 +33,19 @@ export default function Catalogue(){
  const t=giftCopy[lang];
  const ended=!!config.deadline&&Date.now()>new Date(config.deadline+'T23:59:59+09:00').getTime();
  function resetGuest(){setChanging(false);if(verified)void forgetGuest(verified);setVerified('');setLabel('');setMessage('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
- function guestError(e:unknown){if(!(e instanceof ApiError))return `${t.serviceError} (${errorRef('request',e)})`;switch(e.reason){case 'not_found':return t.invalidCode;case 'invalid':return t.invalidDetails;case 'locked':return t.cannotChange;case 'closed':return t.closed;case 'ended':return t.ended;case 'unavailable':return t.giftUnavailable;case 'limit':return t.saveLimit;default:return `${t.serviceError} (${errorRef('request',e)})`;}}
+ function guestError(e:unknown){if(!(e instanceof ApiError))return `${t.serviceError} (${errorRef('request',e)})`;switch(e.reason){case 'not_found':return t.invalidCode;case 'invalid':return t.invalidDetails;case 'locked':return t.cannotChange;case 'closed':return t.closed;case 'ended':return t.ended;case 'unavailable':return t.giftUnavailable;case 'limit':return t.saveLimit;case 'limited':return t.tooMany;default:return `${t.serviceError} (${errorRef('request',e)})`;}}
  // Show the remembered gift list at once, then refresh it from Google in the background.
  function load(early?:Promise<Config>){setLoadError('');const cached=readCatalogue<Config>();if(cached){setConfig(prepareConfig(cached));setLoaded(true)}
   (early?early.catch(()=>callGiftApi<Config>('catalogue')):callGiftApi<Config>('catalogue')).then(d=>{writeCatalogue(d);setConfig(prepareConfig(d));setLoaded(true)}).catch(e=>{console.error('Gift catalogue failed',e);if(!cached)setLoadError(errorRef('catalogue',e))});}
+ // Wrong-code pause on this device: after 5 wrong codes in a row, wait a minute before trying again.
+ const WRONG_KEY='gift-wrong-codes',WAIT_KEY='gift-code-wait';
+ const readNum=(k:string)=>{try{return Number(localStorage.getItem(k))||0}catch{return 0}};
+ const writeNum=(k:string,v:number)=>{try{if(v)localStorage.setItem(k,String(v));else localStorage.removeItem(k)}catch{}};
  // Return visits: show the remembered name and order at once, then confirm with Google in the background.
  async function lookup(value=code,showExisting=false,early?:Promise<LookupData>){
   setError('');const normalized=value.replace(/[\s-]/g,'').toUpperCase();
   const refreshing=verified===normalized;
+  if(!refreshing&&!showExisting&&Date.now()<readNum(WAIT_KEY)){setError(t.waitCode);return}
   const apply=(d:LookupData,keepForm:boolean)=>{setPendingCart(d.cart??'');setSaved(d.saved??[]);setLabel(d.label);setMessage(d.message??'');setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
   const cached=showExisting||refreshing?null:await readGuest<LookupData>(normalized);
   if(cached){apply(cached,false);setOpening(false)}
@@ -49,11 +54,12 @@ export default function Catalogue(){
    const fresh=()=>callGiftApi<LookupData>('lookup',{code:normalized});
    // A real answer from the early-start request (incl. "code not found") is used; anything else retries normally.
    const d=await (early?early.catch(e=>e instanceof ApiError?Promise.reject(e):fresh()):fresh());
-   apply(d,!!cached||refreshing);void writeGuest(normalized,d);recordVisit(normalized);
+   apply(d,!!cached||refreshing);writeNum(WRONG_KEY,0);void writeGuest(normalized,d);recordVisit(normalized);
    if(d.selection){if(showExisting){const g=config.gifts.find(g=>g.id===d.selection!.gift_id)??gifts.find(g=>g.id===d.selection!.gift_id);if(g){setCart(g);setStage('success');setPanel(true)}else setError(t.unavailableGift)}}else if(showExisting){setError(t.noSelection)}
   }catch(e){
    const gone=e instanceof ApiError&&e.reason==='not_found';
    if(gone)void forgetGuest(normalized);
+   if(gone&&!cached&&!refreshing){const n=readNum(WRONG_KEY)+1;if(n>=5){writeNum(WRONG_KEY,0);writeNum(WAIT_KEY,Date.now()+60000);if(!verified)resetGuest();setCode(normalized);setError(t.waitCode);return}writeNum(WRONG_KEY,n)}
    if(cached&&!gone)return; // keep showing the remembered page; it refreshes next time
    if(!verified||cached){resetGuest();setCode(normalized)}
    setError(guestError(e));
