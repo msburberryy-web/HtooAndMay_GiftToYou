@@ -1,44 +1,42 @@
-import urllib.parse
-# Temporary: downloads each gift's main product photo (og:image) and prints the page facts to check.
-import re, sys, json, urllib.request, html, os
-UA = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Version/17.0 Mobile Safari/604.1', 'Accept-Language': 'ja,en;q=0.8'}
+# Temporary: downloads each gift's large product photo, checks stock, and lists in-budget items from category pages.
+import re, json, urllib.request, urllib.parse, html, os
+UA = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36', 'Accept-Language': 'ja'}
 def get(url):
-    req = urllib.request.Request(url, headers=UA)
-    with urllib.request.urlopen(req, timeout=40) as r:
-        raw = r.read(); ctype = r.headers.get('content-type', '')
-    m = re.search(rb'charset=["\']?([\w-]+)', raw[:3000]) or re.search(r'charset=([\w-]+)', ctype)
-    enc = (m.group(1).decode() if isinstance(m.group(1), bytes) else m.group(1)) if m else 'utf-8'
-    return raw.decode(enc, 'replace')
-def text(page):
-    t = re.sub(r'(?is)<(script|style).*?</\1>', ' ', page); t = re.sub(r'<[^>]+>', ' ', t)
-    return re.sub(r'\s+', ' ', html.unescape(t))
-GIFTS = json.load(open('.github/scripts/gifts.json'))
-os.makedirs('product-photos', exist_ok=True)
-for g in GIFTS:
-    print('\n=====', g['id'], g['url'])
-    try:
-        page = get(g['url'])
-    except Exception as e:
-        print('PAGE ERROR', e); continue
-    t = text(page)
-    title = re.search(r'(?is)<title>(.*?)</title>', page)
-    print('TITLE:', html.unescape(title.group(1)).strip()[:150] if title else '-')
-    for kw in ["送料無料","全国送料","包装無料","ラッピング無料","のし無料",'税込', '送料無料', '送料', 'ラッピング', '包装', '在庫', '品切', '販売終了', 'サイズ', '容量', '内容']:
-        for m in list(re.finditer(kw, t))[:3]:
-            print(f'  [{kw}]', t[max(0, m.start()-60):m.end()+80])
-    if g.get('discover'):
-        for href, label in re.findall(r'(?is)<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', page):
-            lab = re.sub(r'<[^>]+>', ' ', label)
-            if re.search(g['discover'], lab): print('  LINK:', href, re.sub(r'\s+', ' ', html.unescape(lab)).strip()[:120])
-        continue
-    img = re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', page) or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image', page)
-    if not img: print('NO og:image'); continue
-    src = urllib.parse.urljoin(g['url'], html.unescape(img.group(1)))
-    print('IMAGE:', src)
-    try:
-        req = urllib.request.Request(src, headers={**UA, 'Referer': g['url']})
-        data = urllib.request.urlopen(req, timeout=40).read()
-        ext = '.png' if data[:4] == b'\x89PNG' else '.webp' if data[8:12] == b'WEBP' else '.jpg'
-        open(f"product-photos/{g['id']}{ext}", 'wb').write(data); print('SAVED', len(data), 'bytes')
-    except Exception as e:
-        print('IMAGE ERROR', e)
+    with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=40) as r: raw = r.read()
+    m = re.search(rb'charset=["\']?([\w-]+)', raw[:3000]); return raw.decode(m.group(1).decode() if m else 'utf-8', 'replace')
+def text(s): s = re.sub(r'(?is)<(script|style).*?</\1>', ' ', s); s = re.sub(r'<[^>]+>', ' ', s); return re.sub(r'\s+', ' ', html.unescape(s))
+cfg = json.load(open('.github/scripts/gifts.json'))
+for c in []:
+    pg = get(f'https://milpoche.jp/Category/Items/{c}?lc=1'); links = re.findall(r'/Item/Detail/\d+', pg)
+    print('DEBUG cat', c, 'links', len(links), 'len', len(pg)); i = pg.find(links[0]) if links else 0
+    print('DEBUG raw', re.sub(r'\s+', ' ', pg[max(0, i-300):i+1500])); os.makedirs('product-photos', exist_ok=True)
+for g in cfg['items']:
+    url = 'https://milpoche.jp/Item/Detail/' + g['item']
+    try: page = get(url)
+    except Exception as e: print('ITEM', g['id'], 'PAGE ERROR', e); continue
+    t = text(page); price = re.search(r'税込￥([\d,]+)', t)
+    hidden = [bool(re.search(r'display:\s*none', m.group(0))) for m in re.finditer(r'<td id="UnavailableReason\d"[^>]*>', page)]
+    shown = [m.group(1) for m in re.finditer(r'<td id="UnavailableReason\d"[^>]*>\s*([^<]+)', page)]
+    stock = 'in stock' if hidden and all(hidden) else 'CHECK: ' + '; '.join(s.strip() for s, h in zip(shown, hidden) if not h)
+    big = sorted({urllib.parse.urljoin(url, s) for s in re.findall(r'src=["\']([^"\']*/Images/Products/450/[^"\']*' + g['item'] + r'M01[^"\']*)', page)})
+    msg = 'no image'
+    if big:
+        data = urllib.request.urlopen(urllib.request.Request(big[0], headers={**UA, 'Referer': url}), timeout=40).read()
+        for old in os.listdir('product-photos'):
+            if old.startswith(g['id'] + '.'): os.remove('product-photos/' + old)
+        open(f"product-photos/{g['id']}.jpg", 'wb').write(data); msg = f'saved {big[0]} ({len(data)} bytes)'
+    det = ' / '.join(m.group(0) for kw in ['内容', '内容量', '現品サイズ', 'サイズ', '容量', '素材', '材質', '原産国', '箱サイズ', 'ハコサイズ'] for m in [re.search(kw + r'[：:][^ ]{1,90}', t)] if m)
+    print('DETAIL', g['id'], '|', (re.search(r'(?is)<title>(.*?)</title>', page).group(1).strip()[:90]), '|', det)
+    print('ITEM', g['id'], '| price', price.group(1) if price else '-', '|', stock, '|', msg)
+seen = set()
+for c in cfg.get('categories', []):
+    for pg in range(1, 6):
+        try: page = get(f'https://milpoche.jp/Category/Items/{c}?lc=1&p={pg}')
+        except Exception as e: print('CAT', c, 'ERROR', e); break
+        lis = re.findall(r'(?is)<li>\s*<p class="img_r.*?</li>', page)
+        for li in lis:
+            code = re.search(r'/Item/Detail/(\d+)', li); name = re.search(r'class="item_name"[^>]*>(.*?)</a>', li); pm = re.search(r'税込(?:&nbsp;|\s)*([\d,]+)', li)
+            if not (code and name) or code.group(1) in seen: continue
+            seen.add(code.group(1)); n = html.unescape(name.group(1)).strip()
+            if re.search(cfg.get('match', '.'), n): print(f"FOUND cat{c} {pm.group(1) if pm else '?'} {'FREE' if '送料無料' in li else 'paid'} https://milpoche.jp/Item/Detail/{code.group(1)} | {n[:80]}")
+        if not lis: break
