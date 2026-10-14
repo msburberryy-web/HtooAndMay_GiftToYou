@@ -67,7 +67,7 @@ const GIFT_CATEGORY_SUGGESTIONS = {
  'wedgwood-geo-bowl':'Kitchen','wedgwood-festivity':'Kitchen','finlayson-hauska-plates':'Kitchen','finlayson-hauska-bowls':'Kitchen',
  'towel':'The living','imabari-wooden-blue':'The living','agnesb-face-towels':'The living','jillstuart-bonheur-towel-c':'The living',
  'bodyshop-hand-set':'Beauty','sabon-mini-body-set':'Beauty, Relaxation','refa-heart-brush-rose-gold':'Beauty','refa-heart-brush-red':'Beauty',
- 'aesop-greetings-guest-room':'Beauty, Relaxation'
+ 'aesop-greetings-guest-room':'Beauty, Relaxation','imabari-shifuku-face-pair':'The living'
 };
 function parseCategories_(v){
  const out=[];
@@ -205,6 +205,30 @@ function updateGiftCategories(){
  SpreadsheetApp.flush();refreshCatalogueNow();
  console.log('Updated the category of '+updated+' gift(s). Categories: '+GIFT_CATEGORIES.join(', ')+'.');
  if(missing.length)console.log('⚠️ Please choose categories for: '+missing.join(', ')+' (Catalogue › Category, e.g. "Coffee, Travel").');
+}
+// Older catalogue rows that a newer row replaces (same product): kept switched off by enableAllGifts.
+const REPLACED_GIFTS = {'towel':'imabari-shifuku-face-pair','iittala':'iittala-aino-pair'};
+const GIFT_BUDGET_YEN = 3500;
+// One click: ticks Enabled for every gift in the Catalogue tab that has a name. Older rows replaced by a newer row
+// for the same product stay off (so guests don't see it twice); gifts over the budget are listed in the log.
+function enableAllGifts(){
+ const sh=giftBook_().getSheetByName(CATALOGUE_TAB);if(!sh)throw new Error('No Catalogue tab. Run setupGiftStandalone first.');
+ const values=sh.getDataRange().getValues(),headers=values[0].map(text_);
+ const col=h=>headers.indexOf(h),ii=col('ID'),ni=col('Name'),pi=col('Price'),ei=col('Enabled');
+ if([ii,ni,pi,ei].some(i=>i<0))throw new Error('The Catalogue tab needs its original column headers.');
+ const ids=new Set(values.slice(1).map(r=>text_(r[ii])));
+ let enabled=0;const kept=[],over=[];
+ values.slice(1).forEach((r,i)=>{
+  const id=text_(r[ii]);if(!id||!text_(r[ni]))return;
+  const replacement=REPLACED_GIFTS[id];
+  if(replacement&&ids.has(replacement)){if(bool_(r[ei]))sh.getRange(i+2,ei+1).setValue(false);kept.push(id+' (replaced by '+replacement+')');return;}
+  if(!bool_(r[ei])){sh.getRange(i+2,ei+1).setValue(true);enabled++;}
+  if(Number(r[pi])>GIFT_BUDGET_YEN)over.push(id+' ¥'+Number(r[pi]).toLocaleString('en'));
+ });
+ SpreadsheetApp.flush();refreshCatalogueNow();
+ console.log('Switched on '+enabled+' more gift(s). Every gift with a name is now enabled.');
+ if(kept.length)console.log('Kept off (same product as a newer row): '+kept.join(', '));
+ if(over.length)console.log('⚠️ Over the ¥'+GIFT_BUDGET_YEN.toLocaleString('en')+' budget: '+over.join(', ')+'. Untick Enabled if you do not want them.');
 }
 function readSettings_(){
  const sh=giftBook_().getSheetByName(SETTINGS_TAB);

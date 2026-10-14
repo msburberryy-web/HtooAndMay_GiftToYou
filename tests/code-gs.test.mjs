@@ -704,3 +704,20 @@ test('hobby categories: several per gift, old names read as hobbies, updateGiftC
   assert.ok(lines.some(l => /Please choose categories for: new-gift/.test(l)), lines.join('\n'));
   assert.deepEqual(gift('hario-mug').categories, ['Coffee'], 'the website sees the update at once');
 });
+
+test('enableAllGifts: every named gift on, replaced duplicates kept off, over-budget gifts listed', () => {
+  const s = setup();
+  const cat = s.book.sheets.Catalogue, h = cat.data[0], col = n => h.indexOf(n);
+  cat.data.push(h.map(x => ({ID: 'imabari-shifuku-face-pair', Brand: 'Imabari Kinsei', Name: 'Shifuku face towels · pair', Category: 'The living', Price: 3300, Enabled: false})[x] ?? ''));
+  cat.data.push(h.map(x => ({ID: 'iittala-aino-pair', Brand: 'iittala', Name: 'Aino Aalto tumblers · pair', Category: 'Kitchen', Price: 3300, Enabled: true})[x] ?? ''));
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.enableAllGifts();
+  const on = id => cat.data.find(r => r[col('ID')] === id)[col('Enabled')];
+  assert.equal(on('imabari-shifuku-face-pair'), true);
+  assert.equal(on('snowpeak'), true);
+  assert.equal(on('towel'), false, 'old row for the same towel stays off');
+  assert.equal(on('iittala'), false);
+  assert.ok(lines.some(l => /Over the ¥3,500 budget: .*lecreuset ¥3,850/.test(l)), lines.join('\n'));
+  const ids = s.post({action: 'catalogue'}).data.gifts.filter(g => g.enabled).map(g => g.id);
+  assert.ok(ids.includes('imabari-shifuku-face-pair') && ids.includes('bodum') && !ids.includes('towel'));
+});
