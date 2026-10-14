@@ -8,6 +8,7 @@ const source = readFileSync(new URL('../setup/Code.gs', import.meta.url), 'utf8'
 
 class Range {
   constructor(sheet, row, col, rows, cols) { Object.assign(this, {sheet, row, col, rows, cols}); }
+  setNote(note) { this.note = note; return this; }
   getValues() { return Array.from({length: this.rows}, (_, r) => Array.from({length: this.cols}, (_, c) => this.sheet.get(this.row + r, this.col + c))); }
   setValues(values) {
     if (values.length !== this.rows || values.some(v => v.length !== this.cols)) throw new Error('setValues size mismatch');
