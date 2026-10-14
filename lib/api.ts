@@ -12,7 +12,24 @@ export class ApiError extends Error {
 
 // Apps Script cannot answer CORS preflight requests, so the body is sent as text/plain (a "simple" request).
 // Apps Script always replies 200; success or failure is carried in the JSON body.
+// Google sometimes answers with an HTML error page (e.g. HTTP 404 for a moment after a new version is deployed)
+// or the connection drops. Requests that only read or record activity are retried twice before showing an error;
+// confirming an order is never retried automatically.
+const RETRYABLE = new Set(['catalogue', 'init', 'lookup', 'track', 'save']);
+const RETRY_DELAYS = [1200, 2500];
 export async function callGiftApi<T>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await callOnce<T>(action, payload);
+    } catch (error) {
+      const transient = error instanceof ApiError && (error.reason === 'network' || error.message.startsWith('Unexpected response'));
+      if (!transient || !RETRYABLE.has(action) || attempt >= RETRY_DELAYS.length) throw error;
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAYS[attempt]));
+    }
+  }
+}
+
+async function callOnce<T>(action: string, payload: Record<string, unknown>): Promise<T> {
   let response: Response;
   try {
     response = await fetch(GIFT_API_URL, {
