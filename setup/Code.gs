@@ -167,7 +167,7 @@ function bumpCacheGen_(){
 /* ───────────── Catalogue & settings ───────────── */
 
 function publicCatalogue_(){
- const cache=CacheService.getScriptCache(),key=cacheKey_('catalogue-v3'),cached=cache.get(key);
+ const cache=CacheService.getScriptCache(),key=cacheKey_('catalogue-v4'),cached=cache.get(key);
  if(cached)return JSON.parse(cached);
  const settings=readSettings_();
  const value={open:settings.open,deadline:settings.deadline,message:settings.message,gifts:readCatalogue_()};
@@ -184,7 +184,8 @@ function readCatalogue_(){
  values.forEach(r=>{
   const id=text_(r[at[0]]);if(!id||seen.has(id))return;seen.add(id);
   const categories=parseCategories_(r[at[3]]);
-  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:categories[0]||'',categories,description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),source:text_(r[at[7]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]])});
+  // Source (column H, the buying link) is for the organisers only and is never sent to the website.
+  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:categories[0]||'',categories,description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]])});
  });
  return gifts;
 }
@@ -266,7 +267,7 @@ function warmGiftCache_(){
  cacheState__=null;
  if(cacheState_().seconds!==GIFT_LONG_CACHE_SECONDS)return; // only once the edit triggers keep the cache correct
  const cache=CacheService.getScriptCache();
- const regKey=cacheKey_('registry-v3'),catKey=cacheKey_('catalogue-v3');
+ const regKey=cacheKey_('registry-v3'),catKey=cacheKey_('catalogue-v4');
  const have=cache.getAll([regKey,catKey]);
  let registry=have[regKey]?new Map(JSON.parse(have[regKey])):null;
  if(!have[catKey])publicCatalogue_();
