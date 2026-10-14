@@ -26,6 +26,13 @@ test('catalogue is public, closed by default, and lists enabled gifts', () => {
   assert.equal(r.data.gifts.filter(g => g.enabled).length, 7);
 });
 
+test('buying links (Source column) stay in the sheet and are never sent to the website', () => {
+  const s = setup();
+  const sent = JSON.stringify([s.post({action: 'catalogue'}), s.post({action: 'init'})]);
+  assert.equal(sent.includes('"source"'), false);
+  assert.equal(/https?:\/\/(shop\.hariocorp|kinto|ec\.snowpeak|milpoche)/.test(sent), false);
+});
+
 test('deadline stored as a Date by Sheets is read as YYYY-MM-DD', () => {
   const s = setup();
   s.setSetting('Deadline', vm.runInContext("new Date('2027-01-15T15:00:00Z')", s.ctx)); // a Date from the script's own realm, as Sheets returns
