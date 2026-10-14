@@ -657,3 +657,30 @@ test('guessing protection: too many wrong codes pause code checks and email the 
   s.ctx.checkGiftSetup();
   assert.ok(lines.some(l => /Wrong codes tried today: 6\d/.test(l)), lines.join('\n'));
 });
+
+test('upgradeGiftCodes: old codes replaced, orders, cart and QR links follow; running again changes nothing', () => {
+  const s = setup(); s.setSetting('Open', true);
+  const h = s.rsvp.data[0];
+  // simulate two old-style 20-character codes
+  s.rsvp.data[1][s.codeIndex] = 'E1FC7462A5DA4CBC9B42'; s.rsvp.data[2][s.codeIndex] = 'A0B1C2D3E4F5A6B7C8D9';
+  s.ctx.refreshCatalogueNow();
+  const oldA = 'E1FC7462A5DA4CBC9B42', oldB = 'A0B1C2D3E4F5A6B7C8D9';
+  assert.equal(s.post({action: 'submit', code: oldA, consent: true, data: delivery}).ok, true);
+  s.post({action: 'track', code: oldB, event: 'cart', giftId: 'hario-mug'});
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.upgradeGiftCodes();
+  const newA = s.codeOf(2), newB = s.codeOf(3);
+  assert.match(newA, /^[23456789ABCDEFGHJKMNPQRSTUVWXYZ]{10}$/);
+  assert.match(s.rsvp.data[1][s.codeIndex], /^.{5}-.{5}$/);
+  assert.equal(s.rsvp.data[1][h.indexOf('Gift QR link')], 'https://msburberryy-web.github.io/HtooAndMay_GiftToYou/#code=' + newA);
+  assert.equal(s.post({action: 'lookup', code: oldA}).reason, 'not_found', 'old code stops working');
+  const a = s.post({action: 'lookup', code: newA}).data;
+  assert.equal(a.selection.status, 'Requested', 'the order moved to the new code');
+  assert.equal(s.post({action: 'lookup', code: newB}).data.cart, 'hario-mug', 'the cart moved too');
+  const orders = s.book.sheets['Order history'].data;
+  assert.ok(orders.slice(1).every(r => r[2] !== oldA) && orders.slice(1).some(r => r[2] === newA));
+  assert.ok(lines.some(l => /^Replaced 2 old code/.test(l)), lines.join('\n'));
+  const snap = JSON.stringify(s.rsvp.data);
+  s.ctx.upgradeGiftCodes();
+  assert.equal(JSON.stringify(s.rsvp.data), snap, 'second run changes nothing');
+});

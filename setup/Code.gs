@@ -652,6 +652,47 @@ function issueGiftCodesForAllGuests(){
   if(short.length)console.log('⚠️ RSVP row(s) '+short.join(', ')+' have a short code that could be guessed. Clear that code cell and run this again to replace it.');
  }finally{lock.releaseLock();}
 }
+// Replaces every old-style code (not 10 characters from the new alphabet) with a new 10-character code, and
+// moves that couple's existing records to the new code: Couples row and QR link, Order history lines, cart.
+// Old codes stop working at once. Run once before printing the cards; running it again changes nothing.
+function upgradeGiftCodes(){
+ const lock=LockService.getScriptLock();lock.waitLock(20000);
+ try{
+  const {sh,headers}=ensureRsvpColumns_();
+  const last=sh.getLastRow();if(last<2){console.log('No RSVP rows yet.');return;}
+  const ci=codeColumn_(headers),qi=headers.indexOf('Gift QR link');
+  const rows=sh.getRange(2,1,last-1,headers.length).getValues();
+  const norm=v=>text_(v).replace(/[\s-]/g,'').toUpperCase();
+  const isNew=c=>c.length===GIFT_CODE_LENGTH&&c.split('').every(ch=>GIFT_CODE_ALPHABET.indexOf(ch)>=0);
+  const existing=new Set(rows.map(r=>norm(r[ci])).filter(Boolean)),moved={};
+  rows.forEach((r,i)=>{
+   const old=norm(r[ci]);if(!old||isNew(old)||moved[old])return;
+   const code=newGiftCode_(existing);existing.add(code);moved[old]=code;
+   sh.getRange(i+2,ci+1).setNumberFormat('@').setValue(displayCode_(code));
+   if(qi>=0)sh.getRange(i+2,qi+1).setValue(GIFT_ORIGIN+'/#code='+code);
+  });
+  const olds=Object.keys(moved);
+  if(!olds.length){console.log('All codes already use the new 10-character format. Nothing to change.');return;}
+  // Couples tab: code (A) and QR link (P)
+  const couples=giftBook_().getSheetByName(COUPLES_TAB);let couplesMoved=0;
+  if(couples&&couples.getLastRow()>=2){
+   const vals=couples.getRange(2,1,couples.getLastRow()-1,16).getValues();
+   vals.forEach((r,i)=>{const c=moved[norm(r[0])];if(c){couples.getRange(i+2,1).setNumberFormat('@').setValue(c);couples.getRange(i+2,16).setValue(GIFT_ORIGIN+'/#code='+c);couplesMoved++;}});
+  }
+  // Order history: Shared code column
+  const orders=giftBook_().getSheetByName(ORDERS_TAB);let ordersMoved=0;
+  if(orders&&orders.getLastRow()>=2){
+   const oc=ORDER_HEADERS.indexOf('Shared code')+1;
+   const vals=orders.getRange(2,oc,orders.getLastRow()-1,1).getValues();
+   vals.forEach((r,i)=>{const c=moved[norm(r[0])];if(c){orders.getRange(i+2,oc).setNumberFormat('@').setValue(c);ordersMoved++;}});
+  }
+  // Remembered carts
+  const props=PropertiesService.getScriptProperties();
+  olds.forEach(old=>{const cart=props.getProperty('CART_'+old);if(cart){props.setProperty('CART_'+moved[old],cart);props.deleteProperty('CART_'+old);}});
+  SpreadsheetApp.flush();refreshCatalogueNow();
+  console.log('Replaced '+olds.length+' old code(s) with new 10-character codes (RSVPs › '+headers[ci]+'). Moved '+couplesMoved+' Couples row(s) and '+ordersMoved+' Order history line(s) to the new codes. The old codes no longer work.');
+ }finally{lock.releaseLock();}
+}
 function issueGiftCodesForConfiguredRows(){
  if(!Array.isArray(GIFT_ROWS_TO_ISSUE)||!GIFT_ROWS_TO_ISSUE.length)throw new Error('Set GIFT_ROWS_TO_ISSUE to the reviewed RSVP row numbers first.');
  const lock=LockService.getScriptLock();lock.waitLock(20000);
