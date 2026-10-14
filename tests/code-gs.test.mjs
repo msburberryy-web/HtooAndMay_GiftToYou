@@ -684,3 +684,23 @@ test('upgradeGiftCodes: old codes replaced, orders, cart and QR links follow; ru
   s.ctx.upgradeGiftCodes();
   assert.equal(JSON.stringify(s.rsvp.data), snap, 'second run changes nothing');
 });
+
+test('hobby categories: several per gift, old names read as hobbies, updateGiftCategories fills the sheet', () => {
+  const s = setup();
+  const cat = s.book.sheets.Catalogue, h = cat.data[0], ci = h.indexOf('Category'), ii = h.indexOf('ID');
+  const row = id => cat.data.findIndex(r => r[ii] === id);
+  const gift = id => s.post({action: 'catalogue'}).data.gifts.find(g => g.id === id);
+  assert.deepEqual(gift('hario-coffee').categories, ['Coffee', 'Kitchen'], 'seeded with hobby categories');
+  cat.data[row('hario-coffee')][ci] = 'coffee,  TRAVEL, Unknown'; s.ctx.refreshCatalogueNow();
+  assert.deepEqual(gift('hario-coffee').categories, ['Coffee', 'Travel'], 'case-insensitive, unknown names ignored');
+  cat.data[row('hario-mug')][ci] = 'For the table'; cat.data[row('hario-bowls')][ci] = 'At home'; s.ctx.refreshCatalogueNow();
+  assert.deepEqual(gift('hario-mug').categories, ['Kitchen'], 'old name read as the closest hobby');
+  assert.deepEqual(gift('hario-bowls').categories, ['The living']);
+  cat.data.push(h.map(x => ({ID: 'new-gift', Brand: 'X', Name: 'Thing', Category: 'Everyday', Enabled: true})[x] ?? ''));
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.updateGiftCategories();
+  assert.equal(cat.data[row('hario-mug')][ci], 'Coffee');
+  assert.equal(cat.data[row('hario-coffee')][ci], 'Coffee, Kitchen');
+  assert.ok(lines.some(l => /Please choose categories for: new-gift/.test(l)), lines.join('\n'));
+  assert.deepEqual(gift('hario-mug').categories, ['Coffee'], 'the website sees the update at once');
+});

@@ -54,7 +54,29 @@ const GIFT_WRONG_CODE_LIMIT = 60;
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
 const GIFT_REGISTRY_CACHE_SECONDS = 3600;
 const CATALOGUE_HEADERS = ['ID','Brand','Name','Category','Description','Details','Image','Source','Price','Enabled'];
-const GIFT_CATEGORIES = ['Everyday','For the table','At home'];
+// Gift categories (our hobbies), in the order the tabs appear. A gift can be in several: write them in the
+// Catalogue › Category cell separated by commas, e.g. "Coffee, Travel". Tabs without gifts are hidden.
+const GIFT_CATEGORIES = ['Camping','Camera','Kitchen','The living','Coffee','Travel','Beauty','Relaxation'];
+// Categories used before the hobby tabs, read as their closest hobby until updateGiftCategories is run.
+const OLD_CATEGORIES = {'everyday':'The living','for the table':'Kitchen','at home':'The living'};
+// Suggested hobby categories for the gifts we picked (used by updateGiftCategories).
+const GIFT_CATEGORY_SUGGESTIONS = {
+ 'hario-coffee':'Coffee, Kitchen','hario-teapot':'Kitchen, Relaxation','hario-bowls':'Kitchen','hario-mug':'Coffee',
+ 'kinto':'Travel, Coffee','kinto-350-white':'Travel, Coffee','kinto-350-khaki':'Travel, Coffee','snowpeak':'Camping, Coffee',
+ 'bodum':'Coffee','iittala':'Kitchen','iittala-aino-pair':'Kitchen','lecreuset':'Kitchen',
+ 'wedgwood-geo-bowl':'Kitchen','wedgwood-festivity':'Kitchen','finlayson-hauska-plates':'Kitchen','finlayson-hauska-bowls':'Kitchen',
+ 'towel':'The living','imabari-wooden-blue':'The living','agnesb-face-towels':'The living','jillstuart-bonheur-towel-c':'The living',
+ 'bodyshop-hand-set':'Beauty','sabon-mini-body-set':'Beauty, Relaxation','refa-heart-brush-rose-gold':'Beauty','refa-heart-brush-red':'Beauty',
+ 'aesop-greetings-guest-room':'Beauty, Relaxation'
+};
+function parseCategories_(v){
+ const out=[];
+ text_(v).split(/[,、\n]/).map(x=>x.trim()).filter(Boolean).forEach(x=>{
+  const key=x.toLowerCase(),hit=GIFT_CATEGORIES.find(c=>c.toLowerCase()===key)||OLD_CATEGORIES[key]||(key==='living'?'The living':'');
+  if(hit&&out.indexOf(hit)<0)out.push(hit);
+ });
+ return out;
+}
 const SETTINGS_DEFAULTS = [
  ['Open',false,'TRUE lets guests confirm gifts. Keep FALSE until the live test or launch.'],
  ['Deadline','2027-01-16','Last day to choose, YYYY-MM-DD, Japan time. Leave empty for "to be announced".'],
@@ -64,19 +86,19 @@ const SETTINGS_DEFAULTS = [
 // Image: an HTTPS URL, or a file name placed in the GitHub repo under public/products/.
 const IMG = 'https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/';
 const CATALOGUE_SEED = [
- ['kinto','KINTO','Travel tumbler · 500ml','Everyday','A little companion for wherever the day takes you.','An insulated stainless steel travel tumbler. The pictured colour is white.',IMG+'kinto.jpg','https://kinto.co.jp/products/20941',3520,false],
- ['iittala','iittala','Aino Aalto · two glasses','For the table','Two glasses, for everyday moments worth sharing.','A pair of 220ml Aino Aalto tumblers in clear glass.',IMG+'iittala.jpg','https://www.iittala.jp/products/detail/349',4400,false],
- ['snowpeak','Snow Peak','Titanium single mug · 450ml','Everyday','For a morning at home, or a weekend somewhere new.','A lightweight, single-wall titanium mug with folding handles. It does not insulate hot drinks.',IMG+'snowpeak.jpg','https://ec.snowpeak.co.jp/item/SNP0117A0185',3520,false],
- ['lecreuset','Le Creuset','Légère bowl · 500ml','For the table','A beautiful place for something made with love.','One 500ml stoneware bowl in cool mint.',IMG+'lecreuset.jpg','https://store.shopping.yahoo.co.jp/lecreuset-japon/lc12439.html',3850,false],
- ['bodum','BODUM','BRAZIL French press · 350ml','At home','A slower start, and a very good cup of coffee.','A manual French press coffee maker. Coffee is not included.',IMG+'bodum.jpg','https://store.shopping.yahoo.co.jp/bodumshop/10948.html',2970,false],
- ['towel','Imabari','Wooden-box face towel pair','At home','A small everyday comfort for your home.','Imabari Kinsei Shifuku towel gift SH55030. Two face towels in a wooden presentation box.',IMG+'towel.jpg','https://www.imabari-kinsei.com/c/purpose/purpose2/066SH55030000030',3300,false],
- ['hario-coffee','HARIO','Glass brewing kit','At home','A slow morning, made a little more beautiful.','Glass Brewing Kit S-VGBK-02-T. Includes a glass dripper and server, a measuring scoop and 40 paper filters. Coffee is not included.',IMG+'hario-coffee.jpg','https://shop.hariocorp.co.jp/products/s-vgbk-02-t',3300,true],
- ['hario-teapot','HARIO','Round glass teapot · 700ml','For the table','Something warm to share, one cup at a time.','Cha Cha Kyusu Maru CHJMN-70T. A 700ml heat-resistant glass teapot with a removable stainless steel tea strainer. Tea is not included.',IMG+'hario-teapot.jpg','https://shop.hariocorp.co.jp/products/chjmn-70t',3300,true],
- ['hario-bowls','HARIO','Lidded glass bowls · pair','At home','For the little things that make a home.','Bowlup BLP-3012-T. Two 1,200ml heat-resistant glass storage bowls with lids.',IMG+'hario-bowls.jpg','https://shop.hariocorp.co.jp/products/blp-3012-t',3300,true],
- ['hario-mug','HARIO','Tea & coffee brewer mug','Everyday','Your favourite cup, wherever the day begins.','TCM-300-GG-EC in greige, 300ml. Includes the tea and coffee brewing mug and heat-retaining lid. Tea and coffee are not included.',IMG+'hario-mug.jpg','https://shop.hariocorp.co.jp/products/tcm-300-gg-ec',3300,true],
- ['kinto-350-white','KINTO','Travel tumbler · 350ml · white','Everyday','A favourite drink, wherever the day takes you.','One 350ml insulated stainless steel travel tumbler in white, in a presentation box. Drinks are not included.',IMG+'kinto-350-white.jpg','https://shop.benesse.ne.jp/gift/list/item1_0Q/item2_01/item3_01/pro_1410064454/',3300,true],
- ['kinto-350-khaki','KINTO','Travel tumbler · 350ml · khaki','Everyday','A little companion for your everyday adventures.','One 350ml insulated stainless steel travel tumbler in khaki, in a presentation box. Drinks are not included.',IMG+'kinto-350-khaki.jpg','https://shop.benesse.ne.jp/gift/list/item1_0Q/item2_01/item3_01/pro_1410064455/',3300,true],
- ['imabari-wooden-blue','Imabari Kinsei','Wooden-box towel set · blue','At home','A soft everyday comfort, beautifully presented.','Monori towel set J in blue: one 60 × 110cm bath towel and one 31 × 33.5cm wash towel, 100% cotton, made in Japan. Presented in a wooden box.',IMG+'imabari-wooden-blue.jpg','https://shop.benesse.ne.jp/gift/list/item1_0O/item2_01/item3_01/pro_1410053669/',3300,true]
+ ['kinto','KINTO','Travel tumbler · 500ml','Travel, Coffee','A little companion for wherever the day takes you.','An insulated stainless steel travel tumbler. The pictured colour is white.',IMG+'kinto.jpg','https://kinto.co.jp/products/20941',3520,false],
+ ['iittala','iittala','Aino Aalto · two glasses','Kitchen','Two glasses, for everyday moments worth sharing.','A pair of 220ml Aino Aalto tumblers in clear glass.',IMG+'iittala.jpg','https://www.iittala.jp/products/detail/349',4400,false],
+ ['snowpeak','Snow Peak','Titanium single mug · 450ml','Camping, Coffee','For a morning at home, or a weekend somewhere new.','A lightweight, single-wall titanium mug with folding handles. It does not insulate hot drinks.',IMG+'snowpeak.jpg','https://ec.snowpeak.co.jp/item/SNP0117A0185',3520,false],
+ ['lecreuset','Le Creuset','Légère bowl · 500ml','Kitchen','A beautiful place for something made with love.','One 500ml stoneware bowl in cool mint.',IMG+'lecreuset.jpg','https://store.shopping.yahoo.co.jp/lecreuset-japon/lc12439.html',3850,false],
+ ['bodum','BODUM','BRAZIL French press · 350ml','Coffee','A slower start, and a very good cup of coffee.','A manual French press coffee maker. Coffee is not included.',IMG+'bodum.jpg','https://store.shopping.yahoo.co.jp/bodumshop/10948.html',2970,false],
+ ['towel','Imabari','Wooden-box face towel pair','The living','A small everyday comfort for your home.','Imabari Kinsei Shifuku towel gift SH55030. Two face towels in a wooden presentation box.',IMG+'towel.jpg','https://www.imabari-kinsei.com/c/purpose/purpose2/066SH55030000030',3300,false],
+ ['hario-coffee','HARIO','Glass brewing kit','Coffee, Kitchen','A slow morning, made a little more beautiful.','Glass Brewing Kit S-VGBK-02-T. Includes a glass dripper and server, a measuring scoop and 40 paper filters. Coffee is not included.',IMG+'hario-coffee.jpg','https://shop.hariocorp.co.jp/products/s-vgbk-02-t',3300,true],
+ ['hario-teapot','HARIO','Round glass teapot · 700ml','Kitchen, Relaxation','Something warm to share, one cup at a time.','Cha Cha Kyusu Maru CHJMN-70T. A 700ml heat-resistant glass teapot with a removable stainless steel tea strainer. Tea is not included.',IMG+'hario-teapot.jpg','https://shop.hariocorp.co.jp/products/chjmn-70t',3300,true],
+ ['hario-bowls','HARIO','Lidded glass bowls · pair','Kitchen','For the little things that make a home.','Bowlup BLP-3012-T. Two 1,200ml heat-resistant glass storage bowls with lids.',IMG+'hario-bowls.jpg','https://shop.hariocorp.co.jp/products/blp-3012-t',3300,true],
+ ['hario-mug','HARIO','Tea & coffee brewer mug','Coffee','Your favourite cup, wherever the day begins.','TCM-300-GG-EC in greige, 300ml. Includes the tea and coffee brewing mug and heat-retaining lid. Tea and coffee are not included.',IMG+'hario-mug.jpg','https://shop.hariocorp.co.jp/products/tcm-300-gg-ec',3300,true],
+ ['kinto-350-white','KINTO','Travel tumbler · 350ml · white','Travel, Coffee','A favourite drink, wherever the day takes you.','One 350ml insulated stainless steel travel tumbler in white, in a presentation box. Drinks are not included.',IMG+'kinto-350-white.jpg','https://shop.benesse.ne.jp/gift/list/item1_0Q/item2_01/item3_01/pro_1410064454/',3300,true],
+ ['kinto-350-khaki','KINTO','Travel tumbler · 350ml · khaki','Travel, Coffee','A little companion for your everyday adventures.','One 350ml insulated stainless steel travel tumbler in khaki, in a presentation box. Drinks are not included.',IMG+'kinto-350-khaki.jpg','https://shop.benesse.ne.jp/gift/list/item1_0Q/item2_01/item3_01/pro_1410064455/',3300,true],
+ ['imabari-wooden-blue','Imabari Kinsei','Wooden-box towel set · blue','The living','A soft everyday comfort, beautifully presented.','Monori towel set J in blue: one 60 × 110cm bath towel and one 31 × 33.5cm wash towel, 100% cotton, made in Japan. Presented in a wooden box.',IMG+'imabari-wooden-blue.jpg','https://shop.benesse.ne.jp/gift/list/item1_0O/item2_01/item3_01/pro_1410053669/',3300,true]
 ];
 // Fill with reviewed RSVP row numbers, for example [12,13,14], then run issueGiftCodesForConfiguredRows.
 const GIFT_ROWS_TO_ISSUE = [];
@@ -161,10 +183,28 @@ function readCatalogue_(){
  const seen=new Set(),gifts=[];
  values.forEach(r=>{
   const id=text_(r[at[0]]);if(!id||seen.has(id))return;seen.add(id);
-  const category=text_(r[at[3]]);
-  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:GIFT_CATEGORIES.indexOf(category)>=0?category:'Everyday',description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),source:text_(r[at[7]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]])});
+  const categories=parseCategories_(r[at[3]]);
+  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:categories[0]||'',categories,description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),source:text_(r[at[7]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]])});
  });
  return gifts;
+}
+// One click: writes the suggested hobby categories into Catalogue › Category for the gifts we picked, and adds a
+// dropdown hint. Gifts not in the list keep their category; the log lists any that still need one.
+function updateGiftCategories(){
+ const sh=giftBook_().getSheetByName(CATALOGUE_TAB);if(!sh)throw new Error('No Catalogue tab. Run setupGiftStandalone first.');
+ const values=sh.getDataRange().getValues(),headers=values[0].map(text_),ci=headers.indexOf('Category'),ii=headers.indexOf('ID');
+ if(ci<0||ii<0)throw new Error('The Catalogue tab needs its ID and Category headers.');
+ let updated=0;const missing=[];
+ values.slice(1).forEach((r,i)=>{
+  const id=text_(r[ii]);if(!id)return;
+  const suggestion=GIFT_CATEGORY_SUGGESTIONS[id];
+  if(suggestion){if(text_(r[ci])!==suggestion){sh.getRange(i+2,ci+1).setValue(suggestion);updated++;}}
+  else if(!parseCategories_(r[ci]).length||/^(everyday|for the table|at home)$/i.test(text_(r[ci])))missing.push(id);
+ });
+ sh.getRange(1,ci+1).setNote('Categories (separate several with commas): '+GIFT_CATEGORIES.join(', '));
+ SpreadsheetApp.flush();refreshCatalogueNow();
+ console.log('Updated the category of '+updated+' gift(s). Categories: '+GIFT_CATEGORIES.join(', ')+'.');
+ if(missing.length)console.log('⚠️ Please choose categories for: '+missing.join(', ')+' (Catalogue › Category, e.g. "Coffee, Travel").');
 }
 function readSettings_(){
  const sh=giftBook_().getSheetByName(SETTINGS_TAB);
