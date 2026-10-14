@@ -1,4 +1,4 @@
-# Temporary: live check after deploying (harmless requests; prints no personal data).
+# Temporary: compares the old and new script addresses (harmless requests, no personal data).
 name: Live speed test
 on:
   push:
@@ -9,17 +9,14 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     steps:
-      - name: Check live site and script
+      - name: Old vs new address
         run: |
-          U='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
-          S='https://msburberryy-web.github.io/HtooAndMay_GiftToYou/'
-          post() { curl -sS -L -m 90 -H 'Content-Type: text/plain' --data "$1" -w '\n%{time_total}' "$U"; }
-          echo "== website"
-          curl -sS -m 60 "$S" -o site.html; grep -o 'AKfycb[A-Za-z0-9_-]*' site.html | sort -u | sed 's/^/script address in page: /'
-          JS=$(grep -o 'assets/index-[A-Za-z0-9_-]*\.js' site.html | head -1); curl -sS -m 60 "$S$JS" -o app.js
-          for t in 'Not your name' 'A little note for you' 'Please wait a minute before trying another code'; do printf "%s: " "$t"; grep -q "$t" app.js && echo present || echo MISSING; done
-          echo "== script"
-          printf "keep-awake GET: "; curl -sS -L -m 90 "$U" | head -c 100; echo
-          post '{"action":"catalogue"}' > r.txt; python3 -c "import json;l=open('r.txt').read().rsplit('\n',1);r=json.loads(l[0]);d=r.get('data') or {};print('gift list: ok=',r.get('ok'),'open=',d.get('open'),'gifts=',len(d.get('gifts') or []),'time=',l[1]+'s')"
-          post '{"action":"init","code":"ZZZZZ-ZZZZZ"}' > r.txt; python3 -c "import json;l=open('r.txt').read().rsplit('\n',1);r=json.loads(l[0]);d=r.get('data') or {};print('first visit, made-up new-style code: catalogue=',bool(d.get('catalogue')),'lookupError=',(d.get('lookupError') or {}).get('reason'),'time=',l[1]+'s')"
-          post '{"action":"lookup","code":"E1FC7462A5DA4CBC9B42"}' > r.txt; python3 -c "import json;l=open('r.txt').read().rsplit('\n',1);r=json.loads(l[0]);print('old test code E1FC…9B42 (should be replaced):', 'still works' if r.get('ok') else r.get('reason'), '| message field present:', 'message' in (r.get('data') or {}))"
+          NEW='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
+          OLD='https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec'
+          for name in NEW OLD; do U=${!name}
+            for i in 1 2 3 4 5; do
+              code=$(curl -sS -L -m 90 -o r.txt -w '%{http_code}' -H 'Content-Type: text/plain' --data '{"action":"lookup","code":"ZZZZZ-ZZZZZ"}' "$U")
+              echo "$name lookup $i: HTTP $code -> $(head -c 110 r.txt | tr '\n' ' ')"
+            done
+          done
+          echo "== website headers"; curl -sS -I -m 60 https://msburberryy-web.github.io/HtooAndMay_GiftToYou/ | grep -i -E 'cache-control|last-modified|age:'
