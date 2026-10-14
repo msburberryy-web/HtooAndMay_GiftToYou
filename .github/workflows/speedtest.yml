@@ -1,4 +1,4 @@
-# Temporary: checks whether the live script returns a gift message (prints only field names and lengths, no personal data). Run 2.
+# Temporary: checks the new live script address with harmless requests (public gift list, a made-up code).
 name: Live speed test
 on:
   push:
@@ -9,15 +9,9 @@ jobs:
   measure:
     runs-on: ubuntu-latest
     steps:
-      - name: Check message field
+      - name: Check new address
         run: |
-          U='https://script.google.com/macros/s/AKfycbx-K_3VArxV25Jkv_ecefRr_23Fp3FEZpqUw2zhQr-IWNeyb3oYI-1wXBajKFQtwGAj/exec'
-          for a in lookup init; do
-            curl -sS -L -m 90 -H 'Content-Type: text/plain' --data "{\"action\":\"$a\",\"code\":\"E1FC7462A5DA4CBC9B42\"}" "$U" -o r.json
-            python3 - "$a" <<'PY'
-          import json,sys
-          r=json.load(open('r.json')); a=sys.argv[1]
-          d=r.get('data') or {}; d=d.get('lookup',d) if a=='init' else d
-          print(a, 'ok=',r.get('ok'), 'status=',r.get('status'), 'reason=',r.get('reason'), 'keys=',sorted(d.keys()) if isinstance(d,dict) else '-', 'has message field=', isinstance(d,dict) and 'message' in d, 'message length=', len(d.get('message') or '') if isinstance(d,dict) else '-')
-          PY
-          done
+          U='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
+          printf "GET: "; curl -sS -L -m 90 "$U" | head -c 120; echo
+          printf "catalogue: "; curl -sS -L -m 90 -H 'Content-Type: text/plain' --data '{"action":"catalogue"}' "$U" | python3 -c "import sys,json;r=json.load(sys.stdin);d=r.get('data') or {};print('ok=',r.get('ok'),'open=',d.get('open'),'gifts=',len(d.get('gifts') or []),'err=',r.get('error'))"
+          printf "init made-up code: "; curl -sS -L -m 90 -H 'Content-Type: text/plain' --data '{"action":"init","code":"ZZZZZZZZZZ"}' "$U" | python3 -c "import sys,json;r=json.load(sys.stdin);d=r.get('data') or {};print('ok=',r.get('ok'),'lookupError=',d.get('lookupError'))"
