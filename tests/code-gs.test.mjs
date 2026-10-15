@@ -766,6 +766,15 @@ test('prize cards: prize codes see only special gifts, guest codes never get the
   assert.ok(/Dear Aye Aye,/.test(email.htmlBody), 'greets the recipient, not the card name');
   // The winner's own guest code still chooses a normal gift.
   assert.equal(take(s.codeOf(2), 'hario-mug').ok, true);
+  // After the game: the winner's name is typed in. The site greets them, and the Couples row shows winner · game.
+  tab.data[1][1] = 'Bingo'; tab.data[1][5] = 'Ma Hnin'; s.ctx.refreshCatalogueNow();
+  const named = s.post({action: 'lookup', code: prize}).data;
+  assert.equal(named.label, 'Ma Hnin');
+  assert.equal(named.prizeName, 'Bingo');
+  assert.equal(take(prize, 'prize-bag').ok, true);
+  const renamed = s.couples.data.find(r => r[0] === prize);
+  assert.deepEqual([renamed[1], renamed[2]], ['Ma Hnin', 'Bingo']);
+  assert.equal(tab.data[0][5], 'Winner', 'Winner column');
   // Switching a card off stops it working.
   tab.data[2][2] = false; s.ctx.refreshCatalogueNow();
   assert.equal(s.post({action: 'lookup', code: String(tab.data[2][0]).replace('-', '')}).reason, 'not_found');
