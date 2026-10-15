@@ -800,7 +800,7 @@ test('name check: code alone is not enough; the right name opens the page and is
     assert.equal(r.data.lookup.label, 'Aye Aye & Ko Ko');
   }
   const log = s.book.sheets['Login log'];
-  assert.deepEqual(log.data[0], ['Time (Japan)', 'Code', 'Names on file', 'Typed name', 'Result', 'Tries left']);
+  assert.deepEqual(log.data[0], ['Time (Japan)', 'Code', 'Names on file', 'Typed name or email', 'Result', 'Tries left']);
   assert.equal(log.data[1][4], 'Match');
   assert.equal(log.data[1][3], 'aye aye');
   assert.match(log.data[1][2], /Aye Aye \/ Ko Ko/);
@@ -850,4 +850,41 @@ test('name check: a prize card saves the first name typed as the Winner', () => 
   // After that, only the winner's name opens the card.
   assert.equal(s.post({action: 'verify', code: prize, name: 'Someone Else'}).reason, 'name_mismatch');
   assert.equal(s.post({action: 'verify', code: prize, name: 'hnin wai'}).ok, true, 'title "Ma" ignored');
+});
+
+test('email login: guest list emails open the right card without the name step', () => {
+  const s = setup();
+  const rsvpBook = Object.values(s.books).find(b => b.getSheetByName('RSVPs'));
+  const sheet = rsvpBook.insertSheet('Finalize Guest List');
+  sheet.data = [
+    ['Main Event'], [''],
+    ['Guest Names', 'Relationship', 'Gender', 'Type', 'Food', 'Transportaion', 'Table No', 'Seat No', 'Mail and Address'],
+    ['Ko Ko', '', '', 'Couple', '', '', 'A', 1, 'KoKo.Mail@Example.com'],
+    ['Aye Aye', '', '', 'Couple', '', '', 'A', 2, ''],
+    ['Su Su', '', '', 'Single', '', '', 'A', 3, 'Mail: susu@example.jp, Tokyo 1-2-3'],
+    ['Stranger', '', '', 'Single', '', '', 'A', 4, 'stranger@example.com'],
+  ];
+  s.ctx.refreshCatalogueNow();
+  const r = s.post({action: 'login', email: '  kokO.mail@example.COM '});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(r.data.code, s.codeOf(2));
+  assert.equal(r.data.lookup.label, 'Aye Aye & Ko Ko');
+  assert.equal(s.post({action: 'lookup', code: r.data.code, pass: r.data.pass}).ok, true, 'the returned pass works');
+  assert.equal(s.post({action: 'login', email: 'susu@example.jp'}).data.code, s.codeOf(3), 'email found inside an address cell');
+  assert.equal(s.post({action: 'login', email: 'stranger@example.com'}).reason, 'not_found', 'a guest with no card is not linked');
+  assert.equal(s.post({action: 'login', email: 'nobody@example.com'}).reason, 'not_found');
+  assert.equal(s.post({action: 'login', email: 'not-an-email'}).reason, 'invalid');
+  const log = s.book.sheets['Login log'];
+  assert.equal(log.data[1][4], 'Email login');
+  assert.equal(log.data[1][3], 'koko.mail@example.com');
+  // RSVPs › Gift email also works (e.g. family members not in the guest list).
+  s.ctx.setupGiftStandalone();
+  const h = s.rsvp.data[0];
+  s.rsvp.data[1][h.indexOf('Gift email')] = 'family@example.com';
+  s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'login', email: 'family@example.com'}).data.code, s.codeOf(2));
+  // The same email on two cards is ambiguous: use the code.
+  s.rsvp.data[2][h.indexOf('Gift email')] = 'family@example.com';
+  s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'login', email: 'family@example.com'}).reason, 'ambiguous');
 });

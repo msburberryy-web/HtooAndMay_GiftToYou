@@ -109,3 +109,13 @@ After the code, every guest types their name. The site opens only when it matche
 - The server enforces it: without passing the name check, the script does not show a guest's details or accept a request.
 
 After pasting this `Code.gs`, run `setupGiftStandalone` once to add the **Accepted names** column, then deploy with **Edit › New version**.
+
+## 8. Sign in with email
+
+Guests can type the **email they replied with** instead of the code (one box takes either). The printed label shows part of that email, e.g. `ay****e@gmail.com`, as a reminder.
+
+- Emails come from the **Finalize Guest List** tab, column **Mail and Address** (any email inside the cell is found). Each guest is linked to their card by name — the same names the name check accepts, so fill **Accepted names** for nicknames. Names that match no card, or several, are skipped and listed in the Executions log.
+- For a card with no email in the guest list (e.g. family), you can add one in RSVPs › **Gift email** (added by `setupGiftStandalone`).
+- Email sign-in skips the name step (knowing the full email is the proof). Code sign-in still asks for the name.
+- An email on two cards is refused; that guest uses the code.
+- Every email sign-in is written to the **Login log** tab ("Email login").
