@@ -85,10 +85,10 @@ The visit only gets back `{"ok":true,"data":{"service":"htoo-may-gift","version"
 A prize is an **extra** gift: the winner keeps their own guest card and normal gift, and gets a prize card with a separate code.
 
 1. Paste the latest `Code.gs`, then **Deploy › Manage deployments › Edit › New version**.
-2. Run **`setupPrizeGifts`** once. It adds a **Group** column to the Catalogue tab (column K) and a **Prize codes** tab with 10 codes (change `PRIZE_CARDS` for more, then run it again — existing codes are kept).
+2. Run **`setupPrizeGifts`** once (already ran it before the Winner column existed? Run it again — it adds the Winner column and keeps your codes). It adds a **Group** column to the Catalogue tab (column K) and a **Prize codes** tab with 10 codes (change `PRIZE_CARDS` for more, then run it again — existing codes are kept).
 3. Paste `setup/prize-gifts.tsv` under the last Catalogue row (column A). Those rows have `Special` in **Group**.
-4. Print the Prize codes (or their **QR link**) on the prize cards. Rename a card in the **Prize** column (e.g. "Bouquet toss winner") — the winner sees that name.
-5. On the day, hand a prize card to each winner.
+4. In the **Prize** column, write the game each card is for (e.g. "Bingo", "Bouquet toss"). Print each card with its game and its code (or **QR link**).
+5. On the day, hand the card to the winner, then type their name in that row's **Winner** column (column F) — on a phone is fine. The website greets them by name ("Ma Hnin · Prize for Bingo"), and their order shows on the Couples tab as **Winner** + **game**. Forgot to type it? It still works; it just shows the game name, and the recipient's name is on the order anyway.
 
 How it behaves:
 - A prize code shows **only** the special gifts; a guest code never shows them and the server refuses them.

@@ -60,7 +60,9 @@ const CATALOGUE_GROUP_HEADER = 'Group';
 // Prize cards for game winners: codes live in the Prize codes tab of the Gift Manager (created by setupPrizeGifts).
 // A prize is an extra gift: the winner keeps their own guest code and normal gift.
 const PRIZE_TAB = 'Prize codes';
-const PRIZE_HEADERS = ['Prize code','Prize','Enabled','QR link','Notes'];
+const PRIZE_HEADERS = ['Prize code','Prize','Enabled','QR link','Notes','Winner'];
+// Prize = the game the card is for (e.g. "Bingo"). Winner = who won it, typed in after the game (optional): the
+// website greets the winner by name and the Couples tab shows "Winner · Prize".
 const PRIZE_CARDS = 10; // how many prize codes setupPrizeGifts keeps ready; run it again after raising this
 const PRIZE_BUDGET_YEN = 5000;
 // Gift categories (our hobbies), in the order the tabs appear. A gift can be in several: write them in the
@@ -271,7 +273,7 @@ function lookup_(code){
  return value;
 }
 function lookupValue_(entry,row,cart){
- return {label:entry.label,message:entry.message||'',prize:!!entry.prize,selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
+ return {label:entry.label,message:entry.message||'',prize:!!entry.prize,prizeName:entry.prizeName||'',selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
 }
 // Pre-load: keeps the gift list, the guest list and every couple's (partly hidden) details ready in the cache, so a
 // guest's code check rarely has to open a spreadsheet. Runs with the every-minute email helper; when everything is
@@ -571,12 +573,15 @@ function rsvpRegistry_(){
 function prizeEntries_(){
  const sh=giftBook_().getSheetByName(PRIZE_TAB);if(!sh||sh.getLastRow()<2)return [];
  const out=[];
- sh.getRange(2,1,sh.getLastRow()-1,3).getValues().forEach((r,i)=>{
-  const code=text_(r[0]).replace(/[\s-]/g,'').toUpperCase();if(!code)return;
-  if(text_(r[2])!==''&&!bool_(r[2]))return;
+ const width=sh.getLastColumn(),headers=sh.getRange(1,1,1,width).getValues()[0].map(text_);
+ const col=h=>headers.indexOf(h),ci=col('Prize code'),pi=col('Prize'),ei=col('Enabled'),wi=col('Winner');
+ if(ci<0)return [];
+ sh.getRange(2,1,sh.getLastRow()-1,width).getValues().forEach((r,i)=>{
+  const code=text_(r[ci]).replace(/[\s-]/g,'').toUpperCase();if(!code)return;
+  if(ei>=0&&text_(r[ei])!==''&&!bool_(r[ei]))return;
   if(!/^[A-Z0-9]{6,40}$/.test(code)){console.warn('Prize codes row '+(i+2)+': invalid code skipped.');return;}
-  const name=text_(r[1])||'Game prize';
-  out.push({code,names:[name],label:name,message:'',prize:true});
+  const prize=(pi>=0&&text_(r[pi]))||'Game prize',winner=wi>=0?text_(r[wi]):'';
+  out.push({code,names:winner?[winner,prize]:[prize],label:winner||prize,prizeName:prize,message:'',prize:true});
  });
  return out;
 }
@@ -595,6 +600,11 @@ function setupPrizeGifts(){
   }
   let sh=book.getSheetByName(PRIZE_TAB);
   if(!sh){sh=book.insertSheet(PRIZE_TAB);sh.getRange(1,1,1,PRIZE_HEADERS.length).setValues([PRIZE_HEADERS]);sh.setFrozenRows(1);}
+  // Tabs made before the Winner column existed: add it.
+  const prizeHeaders=sh.getRange(1,1,1,Math.max(1,sh.getLastColumn())).getValues()[0].map(text_);
+  if(prizeHeaders.indexOf('Winner')<0){const column=prizeHeaders.length+1;if(column>sh.getMaxColumns())sh.insertColumnsAfter(sh.getMaxColumns(),1);sh.getRange(1,column).setValue('Winner');}
+  sh.getRange(1,PRIZE_HEADERS.indexOf('Prize')+1).setNote('The game this card is for, e.g. Bingo. Write it on the printed card too.');
+  sh.getRange(1,PRIZE_HEADERS.indexOf('Winner')+1).setNote('Type the winner\'s name after the game. The website greets them by name.');
   const last=sh.getLastRow(),rows=last<2?[]:sh.getRange(2,1,last-1,PRIZE_HEADERS.length).getValues();
   const norm=v=>text_(v).replace(/[\s-]/g,'').toUpperCase();
   const existing=new Set(rows.map(r=>norm(r[0])).filter(Boolean));
@@ -604,7 +614,7 @@ function setupPrizeGifts(){
   const fresh=[];
   while(have<PRIZE_CARDS){
    const code=newGiftCode_(existing);existing.add(code);have++;added++;
-   fresh.push([displayCode_(code),'Game prize '+have,true,GIFT_ORIGIN+'/#code='+code,'']);
+   fresh.push([displayCode_(code),'Game prize '+have,true,GIFT_ORIGIN+'/#code='+code,'','']);
   }
   if(fresh.length){
    const start=Math.max(2,sh.getLastRow()+1);
@@ -614,7 +624,7 @@ function setupPrizeGifts(){
   }
   SpreadsheetApp.flush();refreshCatalogueNow();
   console.log('Prize gifts ready. '+added+' new prize code(s) added; '+have+' in the Prize codes tab. Mark prize gifts with Special in Catalogue › '+CATALOGUE_GROUP_HEADER+' (budget ¥'+PRIZE_BUDGET_YEN.toLocaleString('en')+').');
-  console.log('Untick Enabled in Prize codes to switch a card off. You can rename a Prize (e.g. "Bouquet toss winner"): the winner sees that name.');
+  console.log('In Prize codes: write the game in Prize (e.g. "Bingo"), and after the game type the winner in Winner. Untick Enabled to switch a card off.');
  }finally{lock.releaseLock();}
 }
 function ensureRsvpColumns_(){
