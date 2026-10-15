@@ -9,7 +9,7 @@ jobs:
       - name: Buying links are private
         run: |
           URL='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
-          SHOPS='milpoche|hariocorp|kinto\.co|snowpeak|iittala\.jp|lecreuset|imabari-kinsei|bodumshop'
+          SHOPS='milpoche|hariocorp|kinto\.co|ec\.snowpeak|iittala\.jp|lecreuset-japon|imabari-kinsei|bodumshop'
           for a in catalogue init; do
             curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"$a\"}" "$URL" -o r.json
             python3 -c "import json;d=json.load(open('r.json'));c=d.get('data',d).get('catalogue',d.get('data',{}));g=c.get('gifts',[]);print('$a ok:',d.get('ok'),'| gifts:',len(g),'| enabled:',sum(1 for x in g if x.get('enabled')))"
