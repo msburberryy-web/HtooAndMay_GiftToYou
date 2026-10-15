@@ -76,7 +76,9 @@ const GIFT_CATEGORY_SUGGESTIONS = {
  'wedgwood-geo-bowl':'Kitchen','wedgwood-festivity':'Kitchen','finlayson-hauska-plates':'Kitchen','finlayson-hauska-bowls':'Kitchen',
  'towel':'The living','imabari-wooden-blue':'The living','agnesb-face-towels':'The living','jillstuart-bonheur-towel-c':'The living',
  'bodyshop-hand-set':'Beauty','sabon-mini-body-set':'Beauty, Relaxation','refa-heart-brush-rose-gold':'Beauty','refa-heart-brush-red':'Beauty',
- 'aesop-greetings-guest-room':'Beauty, Relaxation','imabari-shifuku-face-pair':'The living'
+ 'aesop-greetings-guest-room':'Beauty, Relaxation','imabari-shifuku-face-pair':'The living',
+ 'prize-lecreuset-short-tumbler-pair':'Kitchen, Coffee','prize-costanova-mug-pair':'Coffee, Kitchen','prize-bodum-double-wall-pair':'Coffee, Relaxation',
+ 'prize-kaneko-rinka-plate-pair':'Kitchen','prize-gelatopique-towel-soap':'The living, Relaxation','prize-sabon-body-care-b':'Beauty, Relaxation','prize-johnmasters-gift-b':'Beauty, Travel'
 };
 function parseCategories_(v){
  const out=[];

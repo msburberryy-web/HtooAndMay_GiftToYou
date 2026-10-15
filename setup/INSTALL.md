@@ -79,3 +79,19 @@ Local development: `npm install`, then `npm run dev`. `npm test` checks the Apps
 2. **New monitor** → type **HTTP(s)** → paste your Apps Script `/exec` URL → interval **5 minutes** → create.
 
 The visit only gets back `{"ok":true,"data":{"service":"htoo-may-gift","version":2}}`. It doesn't open any spreadsheet, doesn't see guest data, and isn't counted as a guest visit. The service only knows the `/exec` address, which is already public in the website. As a bonus, it emails you if the gift site stops responding. Delete the monitor after the event.
+
+## 6. Prize gifts for game winners
+
+A prize is an **extra** gift: the winner keeps their own guest card and normal gift, and gets a prize card with a separate code.
+
+1. Paste the latest `Code.gs`, then **Deploy › Manage deployments › Edit › New version**.
+2. Run **`setupPrizeGifts`** once. It adds a **Group** column to the Catalogue tab (column K) and a **Prize codes** tab with 10 codes (change `PRIZE_CARDS` for more, then run it again — existing codes are kept).
+3. Paste `setup/prize-gifts.tsv` under the last Catalogue row (column A). Those rows have `Special` in **Group**.
+4. Print the Prize codes (or their **QR link**) on the prize cards. Rename a card in the **Prize** column (e.g. "Bouquet toss winner") — the winner sees that name.
+5. On the day, hand a prize card to each winner.
+
+How it behaves:
+- A prize code shows **only** the special gifts; a guest code never shows them and the server refuses them.
+- The winner's order appears on the **Couples** tab under the prize name (e.g. "Game prize 1"), with the same Status, Order history and emails as other gifts. The email greets the recipient and says congratulations.
+- To switch a prize card off, untick **Enabled** in the Prize codes tab.
+- Special gifts have a ¥5,000 budget (`PRIZE_BUDGET_YEN`); `enableAllGifts` lists any over it.
