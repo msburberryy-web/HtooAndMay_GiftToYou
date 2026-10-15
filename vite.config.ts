@@ -25,7 +25,7 @@ function earlyStart(): Plugin {
     name: 'early-start-request',
     transformIndexHtml() {
       const url = JSON.stringify(process.env.VITE_GIFT_API_URL || DEFAULT_GIFT_API_URL);
-      const js = `(function(){try{var m=/^#code=([A-Za-z0-9]{6,40})/.exec(location.hash),c=m?m[1]:null;if(!c){try{c=sessionStorage.getItem('gift-code')}catch(e){}}c=c?String(c).replace(/[\\s-]/g,'').toUpperCase():'';window.__giftBoot={code:c,promise:fetch(${url},{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(c?{action:'init',code:c}:{action:'init'}),redirect:'follow'}).then(function(r){return r.json()})}}catch(e){}})();`;
+      const js = `(function(){try{var m=/^#code=([A-Za-z0-9]{6,40})/.exec(location.hash),c=m?m[1]:null;if(!c){try{c=sessionStorage.getItem('gift-code')}catch(e){}}c=c?String(c).replace(/[\\s-]/g,'').toUpperCase():'';var p='';if(c){try{p=sessionStorage.getItem('gift-pass-'+c)||''}catch(e){}}window.__giftBoot={code:c,promise:fetch(${url},{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(c?(p?{action:'init',code:c,pass:p}:{action:'init',code:c}):{action:'init'}),redirect:'follow'}).then(function(r){return r.json()})}}catch(e){}})();`;
       return [{tag: 'script', injectTo: 'head-prepend' as const, children: js}];
     },
   };

@@ -2,10 +2,10 @@ import {DEFAULT_GIFT_API_URL} from './endpoint';
 
 export const GIFT_API_URL: string = import.meta.env.VITE_GIFT_API_URL || DEFAULT_GIFT_API_URL;
 
-export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network';
+export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network' | 'name_required' | 'name_mismatch' | 'name_locked';
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly reason: ApiReason) {
+  constructor(message: string, readonly status: number, readonly reason: ApiReason, readonly triesLeft?: number) {
     super(message);
   }
 }
@@ -29,7 +29,18 @@ export async function callGiftApi<T>(action: string, payload: Record<string, unk
   }
 }
 
+// Name check: once a guest has confirmed their name, the server's proof ("pass") is kept for this browser session
+// and sent with every request for that code. A new session asks for the name again.
+const PASS_PREFIX = 'gift-pass-';
+const codeKey = (code: string) => code.replace(/[\s-]/g, '').toUpperCase();
+export function rememberPass(code: string, pass: string) { try { sessionStorage.setItem(PASS_PREFIX + codeKey(code), pass); } catch { /* storage blocked */ } }
+export function hasPass(code: string) { try { return !!sessionStorage.getItem(PASS_PREFIX + codeKey(code)); } catch { return false; } }
+export function forgetPass(code: string) { try { sessionStorage.removeItem(PASS_PREFIX + codeKey(code)); } catch { /* ignore */ } }
+
 async function callOnce<T>(action: string, payload: Record<string, unknown>): Promise<T> {
+  if (typeof payload.code === 'string' && payload.pass === undefined) {
+    try { const pass = sessionStorage.getItem(PASS_PREFIX + codeKey(payload.code)); if (pass) payload = {...payload, pass}; } catch { /* storage blocked */ }
+  }
   let response: Response;
   try {
     response = await fetch(GIFT_API_URL, {
@@ -41,14 +52,14 @@ async function callOnce<T>(action: string, payload: Record<string, unknown>): Pr
   } catch {
     throw new ApiError('Network error', 0, 'network');
   }
-  let body: {ok?: boolean; status?: number; reason?: ApiReason; error?: string; data?: T} | null = null;
+  let body: {ok?: boolean; status?: number; reason?: ApiReason; error?: string; triesLeft?: number; data?: T} | null = null;
   try {
     body = await response.json();
   } catch {
     throw new ApiError(`Unexpected response (HTTP ${response.status})`, response.status, 'service');
   }
   if (!response.ok || !body || body.ok !== true) {
-    throw new ApiError(body?.error || 'Request failed', body?.status ?? response.status, body?.reason ?? 'service');
+    throw new ApiError(body?.error || 'Request failed', body?.status ?? response.status, body?.reason ?? 'service', body?.triesLeft);
   }
   return body.data as T;
 }

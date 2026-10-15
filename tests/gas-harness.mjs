@@ -2,13 +2,14 @@
 // It checks the backend logic only; a live test against the real deployment is still required.
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
-import {randomUUID} from 'node:crypto';
+import {randomUUID, createHmac} from 'node:crypto';
 
 const source = readFileSync(new URL('../setup/Code.gs', import.meta.url), 'utf8');
 
 class Range {
   constructor(sheet, row, col, rows, cols) { Object.assign(this, {sheet, row, col, rows, cols}); }
   setNote(note) { this.note = note; return this; }
+  setBackground(c) { this.background = c; this.sheet.backgrounds = {...(this.sheet.backgrounds || {}), [this.row]: c}; return this; }
   getValues() { return Array.from({length: this.rows}, (_, r) => Array.from({length: this.cols}, (_, c) => this.sheet.get(this.row + r, this.col + c))); }
   setValues(values) {
     if (values.length !== this.rows || values.some(v => v.length !== this.cols)) throw new Error('setValues size mismatch');
@@ -39,6 +40,7 @@ class Sheet {
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   setFrozenRows() {} setFrozenColumns() {}
   getName() { return this.name; }
+  appendRow(values) { const r = this.getLastRow() + 1; values.forEach((v, i) => this.set(r, i + 1, v)); }
   getConditionalFormatRules() { return this.cfRules || []; }
   setConditionalFormatRules(r) { this.cfRules = r; }
 }
@@ -82,7 +84,7 @@ export function setup(opts = {}) {
     CacheService: {getScriptCache: () => ({get: k => cache[k] ?? null, put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; }, removeAll: ks => ks.forEach(k => { delete cache[k]; }), getAll: ks => Object.fromEntries(ks.filter(k => k in cache).map(k => [k, cache[k]])), putAll: o => { Object.assign(cache, o); }})},
     MailApp: {getRemainingDailyQuota: () => mailQuota - mail.length, sendEmail: m => { if (ctx.MailApp.getRemainingDailyQuota() < 1) throw new Error('quota'); (m.to === OWNER ? notices : mail).push(m); }},
     Session: {getEffectiveUser: () => ({getEmail: () => OWNER})},
-    Utilities: {getUuid: () => randomUUID(), formatDate: (d, tz, fmt) => {
+    Utilities: {getUuid: () => randomUUID(), computeHmacSha256Signature: (v, k) => [...createHmac('sha256', k).update(v).digest()], base64EncodeWebSafe: b => Buffer.from(b).toString('base64url') + '=', formatDate: (d, tz, fmt) => {
       const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', {timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'}).formatToParts(d).map(x => [x.type, x.value]));
       return fmt.replace('yyyy', p.year).replace('MM', p.month).replace('dd', p.day).replace('HH', p.hour).replace('mm', p.minute);
     }},
@@ -94,7 +96,9 @@ export function setup(opts = {}) {
   ctx.issueGiftCodesForConfiguredRows();
   const book = books[GIFT_ID];
   // After a submit, run the background email job the way the every-minute trigger would.
-  const post = body => { const r = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text); if (body.action === 'submit' && !opts.noQueueRun) ctx.processGiftEmailQueue(); return r; };
+  const NEEDS_PASS = new Set(['lookup', 'init', 'submit', 'track', 'save']);
+  const withPass = body => { if (!NEEDS_PASS.has(body.action) || !body.code || 'pass' in body) return body; try { return {...body, pass: ctx.passFor_(String(body.code).replace(/[\s-]/g, '').toUpperCase())}; } catch { return body; } };
+  const post = raw => { const body = withPass(raw); if (body.pass === null) delete body.pass; const r = JSON.parse(ctx.doPost({postData: {contents: JSON.stringify(body)}}).text); if (body.action === 'submit' && !opts.noQueueRun) ctx.processGiftEmailQueue(); return r; };
   const header = rsvp.data[0];
   const codeIndex = header.indexOf('Shared code');
   const codeOf = row => String(rsvp.data[row - 1][codeIndex]).replace(/[\s-]/g, '');

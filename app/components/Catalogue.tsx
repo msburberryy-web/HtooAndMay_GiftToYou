@@ -7,7 +7,7 @@ import {Check,CheckCircle2,Heart,ShoppingBag} from 'lucide-react';
 import OrderStatus from './OrderStatus';
 import StatusScene from './StatusScene';
 import GiftNote from './GiftNote';
-import {ApiError,callGiftApi,giftImage,imageFallback,takeBoot} from '@/lib/api';
+import {ApiError,callGiftApi,forgetPass,giftImage,hasPass,imageFallback,rememberPass,takeBoot} from '@/lib/api';
 import {forgetGuest,readCatalogue,readGuest,writeCatalogue,writeGuest} from '@/lib/guest-cache';
 type Selection={masked?:boolean;order_id?:string;gift_id:string;gift_name?:string;recipient:string;email:string;phone:string;postal:string;address:string;note:string;status:string;tracking:string;first_submitted_at?:string};
 type Stage='detail'|'cart'|'delivery'|'review'|'success';
@@ -25,14 +25,14 @@ const hasPendingCode=()=>{try{return /^#code=[A-Za-z0-9]{6,40}/.test(window.loca
 const pickForm=(f:typeof empty)=>({recipient:f.recipient,email:f.email,phone:f.phone,postal:f.postal,address:f.address,note:f.note});
 export default function Catalogue(){
  const [lang,setLang]=useState<'en'|'my'>('en'),[config,setConfig]=useState<Config>(defaultConfig),[loaded,setLoaded]=useState(false),[loadError,setLoadError]=useState(''),[category,setCategory]=useState('All gifts');
- const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[message,setMessage]=useState(''),[prize,setPrize]=useState(false),[prizeName,setPrizeName]=useState(''),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[pendingCart,setPendingCart]=useState<string|null>(null),[cartNote,setCartNote]=useState(''),[changing,setChanging]=useState(false),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
+ const [detail,setDetail]=useState<Gift|null>(null),[cart,setCart]=useState<Gift|null>(null),[panel,setPanel]=useState(false),[stage,setStage]=useState<Stage>('cart'),[code,setCode]=useState(''),[label,setLabel]=useState(''),[message,setMessage]=useState(''),[prize,setPrize]=useState(false),[prizeName,setPrizeName]=useState(''),[nameFor,setNameFor]=useState(''),[typedName,setTypedName]=useState(''),[nameError,setNameError]=useState(''),[nameLocked,setNameLocked]=useState(false),[verified,setVerified]=useState(''),[form,setForm]=useState(empty),[consent,setConsent]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[selection,setSelection]=useState<Selection|null>(null),[emailStatus,setEmailStatus]=useState(''),[saved,setSaved]=useState<string[]>([]),[saveNote,setSaveNote]=useState(''),[opening,setOpening]=useState(hasPendingCode),[focusOrder,setFocusOrder]=useState(false),[view,setView]=useState<'shop'|'order'>('shop'),[pendingCart,setPendingCart]=useState<string|null>(null),[cartNote,setCartNote]=useState(''),[changing,setChanging]=useState(false),[touched,setTouched]=useState<Partial<Record<Field,boolean>>>({}),[toast,setToast]=useState('');
  const toastTimer=useRef<number|undefined>(undefined);
  function notify(message:string){setToast(message);window.clearTimeout(toastTimer.current);toastTimer.current=window.setTimeout(()=>setToast(''),2400)}
  const saveSeq=useRef(0);
  const cartRestored=useRef(false);
  const t=giftCopy[lang];
  const ended=!!config.deadline&&Date.now()>new Date(config.deadline+'T23:59:59+09:00').getTime();
- function resetGuest(){setChanging(false);if(verified)void forgetGuest(verified);setVerified('');setLabel('');setMessage('');setPrize(false);setPrizeName('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
+ function resetGuest(){setNameFor('');setChanging(false);if(verified)void forgetGuest(verified);setVerified('');setLabel('');setMessage('');setPrize(false);setPrizeName('');setCode('');setPanel(false);setCart(null);setSelection(null);setForm(empty);setConsent(false);setEmailStatus('');setError('');setSaved([]);setSaveNote('');sessionStorage.removeItem('gift-code')}
  function guestError(e:unknown){if(!(e instanceof ApiError))return `${t.serviceError} (${errorRef('request',e)})`;switch(e.reason){case 'not_found':return t.invalidCode;case 'invalid':return t.invalidDetails;case 'locked':return t.cannotChange;case 'closed':return t.closed;case 'ended':return t.ended;case 'unavailable':return t.giftUnavailable;case 'limit':return t.saveLimit;case 'limited':return t.tooMany;default:return `${t.serviceError} (${errorRef('request',e)})`;}}
  // Show the remembered gift list at once, then refresh it from Google in the background.
  function load(early?:Promise<Config>){setLoadError('');const cached=readCatalogue<Config>();if(cached){setConfig(prepareConfig(cached));setLoaded(true)}
@@ -47,7 +47,8 @@ export default function Catalogue(){
   const refreshing=verified===normalized;
   if(!refreshing&&!showExisting&&Date.now()<readNum(WAIT_KEY)){setError(t.waitCode);return}
   const apply=(d:LookupData,keepForm:boolean)=>{setPendingCart(d.cart??'');setSaved(d.saved??[]);setLabel(d.label);setMessage(d.message??'');setPrize(!!d.prize);setPrizeName(d.prizeName??'');setSelection(d.selection);if(!keepForm){setCode(normalized);setVerified(normalized);setEmailStatus('');setConsent(false);setForm(empty);try{sessionStorage.setItem('gift-code',normalized)}catch{}}};
-  const cached=showExisting||refreshing?null:await readGuest<LookupData>(normalized);
+  // The remembered page is shown only once this browser session has passed the name check.
+  const cached=showExisting||refreshing||!hasPass(normalized)?null:await readGuest<LookupData>(normalized);
   if(cached){apply(cached,false);setOpening(false)}
   setBusy(!cached);
   try{
@@ -57,6 +58,8 @@ export default function Catalogue(){
    apply(d,!!cached||refreshing);writeNum(WRONG_KEY,0);void writeGuest(normalized,d);recordVisit(normalized);
    if(d.selection){if(showExisting){const g=config.gifts.find(g=>g.id===d.selection!.gift_id)??gifts.find(g=>g.id===d.selection!.gift_id);if(g){setCart(g);setStage('success');setPanel(true)}else setError(t.unavailableGift)}}else if(showExisting){setError(t.noSelection)}
   }catch(e){
+   // Name check: ask who is opening this card before showing anything.
+   if(e instanceof ApiError&&e.reason==='name_required'){forgetPass(normalized);if(verified||cached)resetGuest();setCode(normalized);setTypedName('');setNameError('');setNameLocked(false);setNameFor(normalized);setOpening(false);return}
    const gone=e instanceof ApiError&&e.reason==='not_found';
    if(gone)void forgetGuest(normalized);
    if(gone&&!cached&&!refreshing){const n=readNum(WRONG_KEY)+1;if(n>=5){writeNum(WRONG_KEY,0);writeNum(WAIT_KEY,Date.now()+60000);if(!verified)resetGuest();setCode(normalized);setError(t.waitCode);return}writeNum(WRONG_KEY,n)}
@@ -65,6 +68,27 @@ export default function Catalogue(){
    setError(guestError(e));
   }finally{setBusy(false)}}
  const lookupRef=useRef(lookup);lookupRef.current=lookup;
+ // Step 2 of opening a card: the guest types their name; it must match the name on the card (3 tries).
+ async function verifyName(e:FormEvent){
+  e.preventDefault();const c=nameFor,typed=typedName.trim();if(!c||busy||nameLocked)return;
+  if(typed.length<2){setNameError(t.nameShort);return}
+  setBusy(true);setNameError('');
+  try{
+   const d=await callGiftApi<{pass:string;lookup:LookupData}>('verify',{code:c,name:typed});
+   rememberPass(c,d.pass);setNameFor('');setBusy(false);setOpening(true);
+   await lookup(c,false,Promise.resolve(d.lookup));setOpening(false);
+  }catch(err){
+   setBusy(false);
+   if(err instanceof ApiError){
+    if(err.reason==='name_mismatch'){setNameError(t.nameWrong.replace('{n}',String(err.triesLeft??'')));return}
+    if(err.reason==='name_locked'){setNameLocked(true);setNameError(t.nameLocked);return}
+    if(err.reason==='not_found'){resetGuest();setError(t.invalidCode);return}
+    // An older gift script without the name check: carry on as before.
+    if(err.reason==='invalid'&&/Unknown action/.test(err.message)){rememberPass(c,'legacy');setNameFor('');void lookup(c);return}
+   }
+   setNameError(guestError(err));
+  }
+ }
  // The one-gift cart is remembered by the sheet (by gift ID): restore it on reloads, return visits and other devices.
  useEffect(()=>{
   if(pendingCart===null)return;
@@ -138,6 +162,7 @@ export default function Catalogue(){
  const languageSwitch=<button type="button" className="language-toggle" role="switch" aria-checked={lang==='my'} aria-label="Use Burmese language" onClick={()=>switchLang(lang==='en'?'my':'en')}><span lang="en">EN</span><span className="toggle-track" aria-hidden="true"><span/></span><span lang="my">မြန်မာ</span></button>;
  const deadline=<p className="ordering-deadline" role="status">{config.deadline?<>{t.due} <time dateTime={config.deadline}>{new Date(config.deadline+'T00:00:00+09:00').toLocaleDateString(lang==='my'?'my-MM':'en-GB',{day:'numeric',month:'long',year:'numeric',timeZone:'Asia/Tokyo'})}</time>{ended&&<> · {t.ended}</>}</>:t.deadlinePending}</p>;
  const monogram=<div className="invitation-mark"><img src={`${import.meta.env.BASE_URL}branding/monogram.png`} alt="Htoo & May monogram" width="480" height="480"/></div>;
+ if(nameFor)return <div lang={lang==='my'?'my':'en'} className={lang==='my'?'burmese':''}><div className="site-shell"><header className="masthead"><a className="wordmark" href={import.meta.env.BASE_URL}>Htoo & May</a>{languageSwitch}</header><main className="login-page">{deadline}<section className="login-card">{monogram}<h1>{t.nameTitle}</h1><p>{t.nameIntro}</p><form onSubmit={verifyName}><label htmlFor="guest-name">{t.nameLabel}<input id="guest-name" required autoFocus autoComplete="name" maxLength={80} value={typedName} disabled={nameLocked} onChange={e=>{setTypedName(e.target.value);if(!nameLocked)setNameError('')}}/></label><button className="primary full" disabled={busy||nameLocked}>{busy?t.checking:t.nameContinue}</button></form>{nameError&&<p className="error" role="alert">{nameError}</p>}<p className="fine">{t.nameHelp}</p><button type="button" className="text-button" onClick={resetGuest}>{t.switchCode}</button></section></main><footer><span>{t.thanks}</span></footer></div></div>;
  if(!verified&&!opening)return <div lang={lang==='my'?'my':'en'} className={lang==='my'?'burmese':''}><div className="site-shell"><header className="masthead"><a className="wordmark" href={import.meta.env.BASE_URL}>Htoo & May</a>{languageSwitch}</header><main className="login-page">{deadline}<section className="login-card">{monogram}<h1>{t.loginTitle}</h1>{opening?<div className="opening" role="status"><div className="opening-dots" aria-hidden="true"><span/><span/><span/></div><p>{t.opening}</p></div>:<><p>{t.loginIntro}</p><form onSubmit={e=>{e.preventDefault();void lookup()}}><label htmlFor="gift-code">{t.loginId}<input id="gift-code" required autoCapitalize="characters" autoComplete="username" maxLength={40} placeholder={t.code} value={code} onChange={e=>setCode(e.target.value.toUpperCase())}/></label><button className="primary full" disabled={busy}>{busy?t.checking:t.enter}</button></form></>}{error&&<p className="error" role="alert">{error}</p>}<p className="fine">{t.codeHelp}</p></section></main><footer><span>{t.thanks}</span></footer></div></div>;
  return <div lang={lang==='my'?'my':'en'} className={lang==='my'?'burmese':''}><div className="site-shell"><header className="masthead"><a className="wordmark" href={import.meta.env.BASE_URL}>Htoo & May</a><nav><a href="#guide" onClick={e=>{e.preventDefault();openGuide()}}>{t.guideLink}</a><button aria-current={view==='order'?'page':undefined} onClick={()=>{if(verified)openOrder();else document.getElementById('gift-code')?.focus()}}>{t.my}</button><button onClick={()=>canShop?openCart():notify(t.cartDone)} aria-disabled={!canShop} className={canShop?'':'nav-disabled'} title={canShop?undefined:t.cartDone}><ShoppingBag size={17} aria-hidden="true"/> {t.cart} ({canShop&&cart?1:0})</button></nav>{languageSwitch}</header>
  <main>{deadline}{view==='order'?<section className="order-page" aria-label={t.orderPage}>
