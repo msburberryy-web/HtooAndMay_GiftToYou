@@ -781,3 +781,73 @@ test('prize cards: prize codes see only special gifts, guest codes never get the
   lines.length = 0; s.ctx.enableAllGifts();
   assert.ok(!lines.some(l => /prize-bag/.test(l)), 'within the ¥5,000 prize budget');
 });
+
+test('name check: code alone is not enough; the right name opens the page and is logged', () => {
+  const s = setup();
+  const code = s.codeOf(2); // Aye Aye & Ko Ko
+  const noPass = s.post({action: 'lookup', code, pass: null});
+  assert.equal(noPass.reason, 'name_required');
+  assert.equal(s.post({action: 'init', code, pass: null}).data.lookupError.reason, 'name_required');
+  assert.equal(s.post({action: 'save', code, saved: [], pass: null}).reason, 'name_required');
+  assert.equal(s.post({action: 'submit', code, consent: true, data: delivery, pass: 'forged'}).reason, 'name_required');
+  // Unknown codes still say "not found" (no name step for a code that does not exist).
+  assert.equal(s.post({action: 'lookup', code: 'ZZZZZ99999', pass: null}).reason, 'not_found');
+  // Either partner, any case, extra spaces, a title, or a small typo is fine.
+  for (const name of ['aye aye', '  Ko  Ko ', 'Daw Aye Aye', 'Ko Ko & Aye Aye', 'AyeAye']) {
+    const r = s.post({action: 'verify', code, name});
+    assert.equal(r.ok, true, name + ' ' + JSON.stringify(r));
+    assert.equal(s.post({action: 'lookup', code, pass: r.data.pass}).ok, true);
+    assert.equal(r.data.lookup.label, 'Aye Aye & Ko Ko');
+  }
+  const log = s.book.sheets['Login log'];
+  assert.deepEqual(log.data[0], ['Time (Japan)', 'Code', 'Names on file', 'Typed name', 'Result', 'Tries left']);
+  assert.equal(log.data[1][4], 'Match');
+  assert.equal(log.data[1][3], 'aye aye');
+  assert.match(log.data[1][2], /Aye Aye \/ Ko Ko/);
+});
+
+test('name check: wrong names are logged, 3 tries then the card pauses', () => {
+  const s = setup();
+  const code = s.codeOf(3); // Su Su
+  const a = s.post({action: 'verify', code, name: 'Mya Mya'});
+  assert.equal(a.reason, 'name_mismatch');
+  assert.equal(a.triesLeft, 2);
+  assert.equal(s.post({action: 'verify', code, name: 'Su'}).triesLeft, 1, 'too short to count as a match');
+  const c = s.post({action: 'verify', code, name: 'Someone Else'});
+  assert.equal(c.reason, 'name_locked');
+  const d = s.post({action: 'verify', code, name: 'Su Su'});
+  assert.equal(d.reason, 'name_locked', 'even the right name waits until the pause ends');
+  const log = s.book.sheets['Login log'];
+  assert.deepEqual(log.data.slice(1).map(r => r[4]), ['No match', 'No match', 'No match', 'Paused (too many tries)']);
+  assert.equal(log.backgrounds[2], '#f8d7da', 'mismatches are highlighted');
+  // Other codes are not affected.
+  assert.equal(s.post({action: 'verify', code: s.codeOf(2), name: 'Aye Aye'}).ok, true);
+  assert.equal(s.post({action: 'verify', code: s.codeOf(2), name: 'Ko'}).reason, 'name_mismatch', '"Ko" alone is not "Ko Ko"');
+});
+
+test('name check: Accepted names column lets nicknames through', () => {
+  const s = setup();
+  s.ctx.setupGiftStandalone();
+  const h = s.rsvp.data[0], xi = h.indexOf('Accepted names');
+  assert.ok(xi >= 0, 'Accepted names column added');
+  s.rsvp.data[2][xi] = 'Su Shoon Lae Nwe, Mee Mee';
+  s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'verify', code: s.codeOf(3), name: 'su shoon lae nwe'}).ok, true);
+});
+
+test('name check: a prize card saves the first name typed as the Winner', () => {
+  const s = setup();
+  s.ctx.setupPrizeGifts();
+  const tab = s.book.sheets['Prize codes'];
+  const prize = String(tab.data[1][0]).replace('-', '');
+  const r = s.post({action: 'verify', code: prize, name: 'Ma Hnin Wai'});
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.equal(tab.data[1][5], 'Ma Hnin Wai');
+  assert.equal(r.data.lookup.label, 'Ma Hnin Wai');
+  assert.equal(r.data.lookup.prize, true);
+  const log = s.book.sheets['Login log'];
+  assert.equal(log.data.at(-1)[4], 'Prize winner saved');
+  // After that, only the winner's name opens the card.
+  assert.equal(s.post({action: 'verify', code: prize, name: 'Someone Else'}).reason, 'name_mismatch');
+  assert.equal(s.post({action: 'verify', code: prize, name: 'hnin wai'}).ok, true, 'title "Ma" ignored');
+});

@@ -65,6 +65,16 @@ const PRIZE_HEADERS = ['Prize code','Prize','Enabled','QR link','Notes','Winner'
 // website greets the winner by name and the Couples tab shows "Winner · Prize".
 const PRIZE_CARDS = 10; // how many prize codes setupPrizeGifts keeps ready; run it again after raising this
 const PRIZE_BUDGET_YEN = 5000;
+// Name check: after the code, the guest types their name. It must match a name on file for that code
+// (RSVPs › Name, Guest name(s), Gift display name or Accepted names; any partner of a couple works).
+// Every attempt is written to the Login log tab. After NAME_TRIES wrong names the card pauses for NAME_LOCK_MINUTES.
+// A prize card with an empty Winner accepts the first name typed and writes it into Prize codes › Winner.
+const LOGIN_TAB = 'Login log';
+const LOGIN_HEADERS = ['Time (Japan)','Code','Names on file','Typed name','Result','Tries left'];
+const NAME_TRIES = 3;
+const NAME_LOCK_MINUTES = 30;
+// Titles ignored when comparing names ("Ko Nyan" = "Nyan"). Only at the start of a name.
+const NAME_TITLES = ['u','daw','ko','ma','mr','mrs','ms','miss','dr'];
 // Gift categories (our hobbies), in the order the tabs appear. A gift can be in several: write them in the
 // Catalogue › Category cell separated by commas, e.g. "Coffee, Travel". Tabs without gifts are hidden.
 const GIFT_CATEGORIES = ['Camping','Camera','Kitchen','The living','Coffee','Travel','Beauty','Relaxation'];
@@ -130,14 +140,16 @@ function doPost(e){
   action=String(p.action||'');
   if(action==='catalogue')return output_({ok:true,data:publicCatalogue_()});
   if(action==='lookup'&&codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
-  if(action==='lookup')return output_({ok:true,data:lookup_(normalizeCode_(p.code))});
+  if(action==='lookup'){const code=normalizeCode_(p.code);registryEntry_(code);requirePass_(p,code);return output_({ok:true,data:lookup_(code)});}
+  if(action==='verify')return output_({ok:true,data:verify_(p)});
   // First visit: the gift list and (when a code is given) the guest's details in one request.
   if(action==='init'){
    const out={catalogue:publicCatalogue_()};
    if(p.code&&codeChecksPaused_())out.lookupError={status:429,reason:'limited',error:'Too many codes were tried. Please wait a few minutes and try again.'};
-   else if(p.code){try{out.lookup=lookup_(normalizeCode_(p.code));}catch(error){if(!error.status)throw error;if(error.reason==='not_found')noteWrongCode_();out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
+   else if(p.code){try{const code=normalizeCode_(p.code);registryEntry_(code);requirePass_(p,code);out.lookup=lookup_(code);}catch(error){if(!error.status)throw error;if(error.reason==='not_found')noteWrongCode_();out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
    return output_({ok:true,data:out});
   }
+  if(action==='submit'||action==='track'||action==='save')requirePass_(p,normalizeCode_(p.code));
   if(action==='submit'){lock=acquireLock_();return output_({ok:true,data:submit_(p)});}
   if(action==='track')return output_({ok:true,data:track_(p)});
   if(action==='save')return output_({ok:true,data:save_(p)});
@@ -148,7 +160,9 @@ function doPost(e){
   if(error.reason==='not_found')noteWrongCode_();
   if(error.status)console.warn('doPost '+(action||'?')+' refused: '+error.status+' '+(error.reason||'')+' — '+error.message);
   else console.error('doPost '+(action||'?')+' failed: '+(error.stack||error));
-  return output_({ok:false,status:error.status||503,reason:error.reason||'service',error:error.status?error.message:'The sheet could not save this request. Please retry with the same code.'});
+  const out={ok:false,status:error.status||503,reason:error.reason||'service',error:error.status?error.message:'The sheet could not save this request. Please retry with the same code.'};
+  if(error.triesLeft!=null)out.triesLeft=error.triesLeft;
+  return output_(out);
  }finally{if(lock&&lock.hasLock())lock.releaseLock();}
 }
 
@@ -283,7 +297,7 @@ function warmGiftCache_(){
  cacheState__=null;
  if(cacheState_().seconds!==GIFT_LONG_CACHE_SECONDS)return; // only once the edit triggers keep the cache correct
  const cache=CacheService.getScriptCache();
- const regKey=cacheKey_('registry-v3'),catKey=cacheKey_('catalogue-v4');
+ const regKey=cacheKey_('registry-v4'),catKey=cacheKey_('catalogue-v4');
  const have=cache.getAll([regKey,catKey]);
  let registry=have[regKey]?new Map(JSON.parse(have[regKey])):null;
  if(!have[catKey])publicCatalogue_();
@@ -529,7 +543,7 @@ function syncRsvp_(sheet,registry){registry.forEach(entry=>ensureCoupleRow_(shee
 
 // Cached guest list for fast code checks. A code missing from the cache is re-checked against the sheet.
 function registryEntry_(code){
- const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v3'),hit=cache.get(key);
+ const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v4'),hit=cache.get(key);
  if(hit){const entry=new Map(JSON.parse(hit)).get(code);if(entry)return entry;}
  const registry=rsvpRegistry_(),json=JSON.stringify(Array.from(registry.entries()));
  if(json.length<90000)cache.put(key,json,cacheState_().seconds===GIFT_LONG_CACHE_SECONDS?GIFT_LONG_CACHE_SECONDS:GIFT_REGISTRY_CACHE_SECONDS);
@@ -544,7 +558,7 @@ function rsvpRegistry_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw fault_('RSVPs tab not found.',503,'service');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)'),mi=headers.indexOf('Gift message');
+ const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)'),mi=headers.indexOf('Gift message'),xi=headers.indexOf('Accepted names');
  if(ci<0||ai<0)throw fault_('Run setupGiftStandalone to add the Gift code column to RSVPs.',503,'service');
  const rows=sh.getLastRow()<2?[]:sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues();
  const result=new Map(),duplicates=new Set();
@@ -561,7 +575,9 @@ function rsvpRegistry_(){
   if(result.has(code)){duplicates.add(code);return;}
   // Optional personal note shown in the gift box at the top of the guest's page (line breaks kept).
   const message=mi>=0?String(r[mi]==null?'':r[mi]).replace(/\r\n?/g,'\n').trim().slice(0,GIFT_MESSAGE_MAX):'';
-  result.set(code,{code,names:unique,label:unique.join(' & '),message});
+  // Names a guest may type at the name check (any of them is enough).
+  const accept=[main,gi>=0?text_(r[gi]):'',override,xi>=0?text_(r[xi]):''].filter(Boolean);
+  result.set(code,{code,names:unique,label:unique.join(' & '),message,accept});
  });
  prizeEntries_().forEach(entry=>{if(result.has(entry.code))duplicates.add(entry.code);else result.set(entry.code,entry);});
  // A code on two rows is ambiguous: block it until the organiser fixes the RSVP sheet.
@@ -581,12 +597,100 @@ function prizeEntries_(){
   if(ei>=0&&text_(r[ei])!==''&&!bool_(r[ei]))return;
   if(!/^[A-Z0-9]{6,40}$/.test(code)){console.warn('Prize codes row '+(i+2)+': invalid code skipped.');return;}
   const prize=(pi>=0&&text_(r[pi]))||'Game prize',winner=wi>=0?text_(r[wi]):'';
-  out.push({code,names:winner?[winner,prize]:[prize],label:winner||prize,prizeName:prize,message:'',prize:true});
+  out.push({code,names:winner?[winner,prize]:[prize],label:winner||prize,prizeName:prize,message:'',prize:true,winner,accept:winner?[winner]:[]});
  });
  return out;
 }
 // One click: adds the Group column to the Catalogue (write Special for prize gifts) and the Prize codes tab with
 // PRIZE_CARDS codes for the prize cards. Safe to run again: existing codes are kept, missing ones are added.
+/* ───────────── Name check ───────────── */
+
+// A short proof that this code's name check was passed. It is not stored anywhere: the server recomputes it.
+function passFor_(code){
+ const props=PropertiesService.getScriptProperties();
+ let secret=props.getProperty('GIFT_TOKEN');
+ if(!secret){secret=(Utilities.getUuid()+Utilities.getUuid()).replace(/-/g,'');props.setProperty('GIFT_TOKEN',secret);}
+ return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature('pass:'+code,secret)).slice(0,22);
+}
+function requirePass_(p,code){
+ if(typeof p.pass!=='string'||p.pass!==passFor_(code))throw fault_('Please confirm your name to continue.',401,'name_required');
+}
+function verify_(p){
+ const code=normalizeCode_(p.code);
+ if(codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
+ let entry=registryEntry_(code);
+ const typed=String(p.name==null?'':p.name).normalize('NFKC').replace(/\s+/g,' ').trim().slice(0,80);
+ if(typed.length<2)throw fault_('Please type your name.',400,'invalid');
+ const cache=CacheService.getScriptCache(),failKey='name-fail-'+code;
+ let fails=Number(cache.get(failKey))||0;
+ if(fails>=NAME_TRIES){logLogin_(code,entry,typed,'Paused (too many tries)',0);throw lockedFault_();}
+ let result;
+ if(entry.prize&&!entry.winner){
+  const lock=acquireLock_();
+  try{setPrizeWinner_(code,typed);}finally{lock.releaseLock();}
+  result='Prize winner saved';
+  entry=registryEntry_(code);
+ }else if(nameMatches_(typed,entry.accept||[])){result='Match';}
+ else{
+  fails++;cache.put(failKey,String(fails),NAME_LOCK_MINUTES*60);
+  logLogin_(code,entry,typed,'No match',NAME_TRIES-fails);
+  if(fails>=NAME_TRIES)throw lockedFault_();
+  const e=fault_('That name does not match this card. Please check the spelling and try again.',403,'name_mismatch');e.triesLeft=NAME_TRIES-fails;throw e;
+ }
+ cache.remove(failKey);
+ logLogin_(code,entry,typed,result,'');
+ return {pass:passFor_(code),lookup:lookup_(code)};
+}
+function lockedFault_(){const e=fault_('For your security, this card is paused for '+NAME_LOCK_MINUTES+' minutes. Please contact Htoo & May if you need help.',429,'name_locked');e.triesLeft=0;return e;}
+// Forgiving comparison: case, spaces, punctuation and titles (U, Daw, Ko, Ma…) are ignored, word order does not
+// matter, and a small typo is allowed in longer names. A name on file like "Ko Nyan (or) Nyan Linn Aung" or
+// "Aye Aye & Ko Ko" counts as each of its names.
+function nameMatches_(typed,onFile){
+ const parts=s=>String(s).split(/\s*(?:&|,|、|\/|\(|\)|\bor\b|\band\b|\n)\s*/i).map(nameKey_).filter(k=>k.length>=2);
+ const mine=parts(typed).concat([nameKey_(typed)]).filter(k=>k.length>=2);
+ const theirs=[];onFile.forEach(v=>{theirs.push(nameKey_(v));parts(v).forEach(k=>theirs.push(k));});
+ return mine.some(a=>theirs.some(b=>{
+  if(!b)return false;
+  const ca=a.replace(/ /g,''),cb=b.replace(/ /g,'');
+  if(ca===cb)return true;
+  if(a.split(' ').sort().join('')===b.split(' ').sort().join(''))return true;
+  const allowed=cb.length>=10?2:cb.length>=5?1:0;
+  return allowed>0&&Math.abs(ca.length-cb.length)<=allowed&&editDistance_(ca,cb)<=allowed;
+ }));
+}
+function nameKey_(s){
+ const words=String(s).normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{M}\p{N}\s]/gu,' ').split(/\s+/).filter(Boolean);
+ // Drop a leading title, unless that would leave a very short name ("Ko Ko" stays "ko ko").
+ while(words.length>1&&NAME_TITLES.indexOf(words[0])>=0&&words.slice(1).join('').length>=4)words.shift();
+ return words.join(' ');
+}
+function editDistance_(a,b){
+ let prev=Array.from({length:b.length+1},(_,j)=>j);
+ for(let i=1;i<=a.length;i++){const cur=[i];for(let j=1;j<=b.length;j++)cur[j]=Math.min(prev[j]+1,cur[j-1]+1,prev[j-1]+(a[i-1]===b[j-1]?0:1));prev=cur;}
+ return prev[b.length];
+}
+function logLogin_(code,entry,typed,result,triesLeft){
+ try{
+  const book=giftBook_();let sh=book.getSheetByName(LOGIN_TAB);
+  if(!sh){sh=book.insertSheet(LOGIN_TAB);sh.getRange(1,1,1,LOGIN_HEADERS.length).setValues([LOGIN_HEADERS]);sh.setFrozenRows(1);}
+  const onFile=(entry.accept&&entry.accept.length?entry.accept.join(' / '):'')||(entry.prize?entry.label+' (no winner yet)':entry.label);
+  sh.appendRow([japanNow_(),displayCode_(code),cell_(onFile),cell_(typed),result,triesLeft===''?'':String(triesLeft)]);
+  if(result!=='Match'){const row=sh.getLastRow();sh.getRange(row,1,1,LOGIN_HEADERS.length).setBackground(/winner/.test(result)?'#fdf3d8':'#f8d7da');}
+ }catch(error){console.warn('Login log not written: '+(error.message||error));}
+}
+// First name typed on a prize card becomes its Winner (only while the Winner cell is empty).
+function setPrizeWinner_(code,name){
+ const sh=giftBook_().getSheetByName(PRIZE_TAB);if(!sh)return;
+ const width=sh.getLastColumn(),headers=sh.getRange(1,1,1,width).getValues()[0].map(text_);
+ let wi=headers.indexOf('Winner');
+ if(wi<0){wi=headers.length;if(wi+1>sh.getMaxColumns())sh.insertColumnsAfter(sh.getMaxColumns(),1);sh.getRange(1,wi+1).setValue('Winner');}
+ const ci=headers.indexOf('Prize code');if(ci<0||sh.getLastRow()<2)return;
+ const codes=sh.getRange(2,ci+1,sh.getLastRow()-1,1).getValues().map(r=>text_(r[0]).replace(/[\s-]/g,'').toUpperCase());
+ const i=codes.indexOf(code);if(i<0)return;
+ const cell=sh.getRange(i+2,wi+1);
+ if(!text_(cell.getValues()[0][0]))cell.setValue(cell_(name));
+ SpreadsheetApp.flush();refreshCatalogueNow();
+}
 function isPrizeCode_(code){const c=text_(code).replace(/[\s-]/g,'').toUpperCase();try{return prizeEntries_().some(e=>e.code===c);}catch(_){return false;}}
 function setupPrizeGifts(){
  const lock=LockService.getScriptLock();lock.waitLock(20000);
@@ -631,7 +735,7 @@ function ensureRsvpColumns_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw new Error('RSVPs tab not found.');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- ['Gift code','Gift display name','Gift QR link','Gift enabled','Gift message'].forEach(name=>{
+ ['Gift code','Gift display name','Gift QR link','Gift enabled','Gift message','Accepted names'].forEach(name=>{
   if(name==='Gift code'&&codeColumn_(headers)>=0)return;
   if(headers.indexOf(name)>=0)return;
   const column=headers.length+1;if(column>sh.getMaxColumns())sh.insertColumnsAfter(sh.getMaxColumns(),1);

@@ -95,3 +95,17 @@ How it behaves:
 - The winner's order appears on the **Couples** tab under the prize name (e.g. "Game prize 1"), with the same Status, Order history and emails as other gifts. The email greets the recipient and says congratulations.
 - To switch a prize card off, untick **Enabled** in the Prize codes tab.
 - Special gifts have a ¥5,000 budget (`PRIZE_BUDGET_YEN`); `enableAllGifts` lists any over it.
+
+## 7. Name check at login
+
+After the code, every guest types their name. The site opens only when it matches a name on file for that code, so a card found or passed on is not enough on its own.
+
+- **Names on file:** RSVPs › **Name**, **Guest name(s)**, **Gift display name**, and the new **Accepted names** column (added by `setupGiftStandalone`). On a couple card either name works. Capital letters, spaces, word order, titles (U, Daw, Ko, Ma…) and a small typo in a longer name are ignored.
+- **Nicknames:** when the RSVP has a nickname ("Mee Mee") but the guest will type their real name, write the real name in **Accepted names**. Several names: separate them with commas.
+- **3 tries:** after 3 wrong names the card pauses for 30 minutes (`NAME_TRIES`, `NAME_LOCK_MINUTES`). Other cards are not affected.
+- **Login log tab** (Gift Manager): one row per attempt — time, code, names on file, what was typed, and the result. *No match* rows are red; *Prize winner saved* rows are yellow.
+- **Prize cards:** while **Winner** is empty, the first name typed is accepted and written into Prize codes › Winner. After that, only that name opens the card.
+- Asked once per browser session: reloading keeps the guest in; a new session or another phone asks again.
+- The server enforces it: without passing the name check, the script does not show a guest's details or accept a request.
+
+After pasting this `Code.gs`, run `setupGiftStandalone` once to add the **Accepted names** column, then deploy with **Edit › New version**.
