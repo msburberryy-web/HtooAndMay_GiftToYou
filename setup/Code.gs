@@ -54,6 +54,15 @@ const GIFT_WRONG_CODE_LIMIT = 60;
 // so newly issued codes work at once; other RSVP edits (e.g. Gift enabled = No) apply within an hour or after refreshCatalogueNow.
 const GIFT_REGISTRY_CACHE_SECONDS = 3600;
 const CATALOGUE_HEADERS = ['ID','Brand','Name','Category','Description','Details','Image','Source','Price','Enabled'];
+// Optional Catalogue column K: write Special for a prize gift. Special gifts are shown only to prize codes, and prize
+// codes see only special gifts. Leave it empty for the normal gifts every guest chooses from.
+const CATALOGUE_GROUP_HEADER = 'Group';
+// Prize cards for game winners: codes live in the Prize codes tab of the Gift Manager (created by setupPrizeGifts).
+// A prize is an extra gift: the winner keeps their own guest code and normal gift.
+const PRIZE_TAB = 'Prize codes';
+const PRIZE_HEADERS = ['Prize code','Prize','Enabled','QR link','Notes'];
+const PRIZE_CARDS = 10; // how many prize codes setupPrizeGifts keeps ready; run it again after raising this
+const PRIZE_BUDGET_YEN = 5000;
 // Gift categories (our hobbies), in the order the tabs appear. A gift can be in several: write them in the
 // Catalogue › Category cell separated by commas, e.g. "Coffee, Travel". Tabs without gifts are hidden.
 const GIFT_CATEGORIES = ['Camping','Camera','Kitchen','The living','Coffee','Travel','Beauty','Relaxation'];
@@ -67,7 +76,9 @@ const GIFT_CATEGORY_SUGGESTIONS = {
  'wedgwood-geo-bowl':'Kitchen','wedgwood-festivity':'Kitchen','finlayson-hauska-plates':'Kitchen','finlayson-hauska-bowls':'Kitchen',
  'towel':'The living','imabari-wooden-blue':'The living','agnesb-face-towels':'The living','jillstuart-bonheur-towel-c':'The living',
  'bodyshop-hand-set':'Beauty','sabon-mini-body-set':'Beauty, Relaxation','refa-heart-brush-rose-gold':'Beauty','refa-heart-brush-red':'Beauty',
- 'aesop-greetings-guest-room':'Beauty, Relaxation','imabari-shifuku-face-pair':'The living'
+ 'aesop-greetings-guest-room':'Beauty, Relaxation','imabari-shifuku-face-pair':'The living',
+ 'prize-lecreuset-short-tumbler-pair':'Kitchen, Coffee','prize-costanova-mug-pair':'Coffee, Kitchen','prize-bodum-double-wall-pair':'Coffee, Relaxation',
+ 'prize-kaneko-rinka-plate-pair':'Kitchen','prize-gelatopique-towel-soap':'The living, Relaxation','prize-sabon-body-care-b':'Beauty, Relaxation','prize-johnmasters-gift-b':'Beauty, Travel'
 };
 function parseCategories_(v){
  const out=[];
@@ -180,12 +191,13 @@ function readCatalogue_(){
  const values=sh.getDataRange().getValues(),headers=values.shift().map(text_);
  const at=CATALOGUE_HEADERS.map(h=>headers.indexOf(h));
  if(at.some(i=>i<0))throw fault_('The Catalogue tab needs its original column headers.',503,'service');
+ const gi=headers.indexOf(CATALOGUE_GROUP_HEADER);
  const seen=new Set(),gifts=[];
  values.forEach(r=>{
   const id=text_(r[at[0]]);if(!id||seen.has(id))return;seen.add(id);
   const categories=parseCategories_(r[at[3]]);
   // Source (column H, the buying link) is for the organisers only and is never sent to the website.
-  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:categories[0]||'',categories,description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]])});
+  gifts.push({id,brand:text_(r[at[1]]),name:text_(r[at[2]]),category:categories[0]||'',categories,description:text_(r[at[4]]),details:text_(r[at[5]]),image:text_(r[at[6]]),price:Number(r[at[8]])||0,enabled:bool_(r[at[9]])&&!!text_(r[at[2]]),special:gi>=0&&isSpecial_(r[gi])});
  });
  return gifts;
 }
@@ -215,7 +227,7 @@ const GIFT_BUDGET_YEN = 3500;
 function enableAllGifts(){
  const sh=giftBook_().getSheetByName(CATALOGUE_TAB);if(!sh)throw new Error('No Catalogue tab. Run setupGiftStandalone first.');
  const values=sh.getDataRange().getValues(),headers=values[0].map(text_);
- const col=h=>headers.indexOf(h),ii=col('ID'),ni=col('Name'),pi=col('Price'),ei=col('Enabled');
+ const col=h=>headers.indexOf(h),ii=col('ID'),ni=col('Name'),pi=col('Price'),ei=col('Enabled'),gi=col(CATALOGUE_GROUP_HEADER);
  if([ii,ni,pi,ei].some(i=>i<0))throw new Error('The Catalogue tab needs its original column headers.');
  const ids=new Set(values.slice(1).map(r=>text_(r[ii])));
  let enabled=0;const kept=[],over=[];
@@ -224,13 +236,15 @@ function enableAllGifts(){
   const replacement=REPLACED_GIFTS[id];
   if(replacement&&ids.has(replacement)){if(bool_(r[ei]))sh.getRange(i+2,ei+1).setValue(false);kept.push(id+' (replaced by '+replacement+')');return;}
   if(!bool_(r[ei])){sh.getRange(i+2,ei+1).setValue(true);enabled++;}
-  if(Number(r[pi])>GIFT_BUDGET_YEN)over.push(id+' ¥'+Number(r[pi]).toLocaleString('en'));
+  const budget=gi>=0&&isSpecial_(r[gi])?PRIZE_BUDGET_YEN:GIFT_BUDGET_YEN;
+  if(Number(r[pi])>budget)over.push(id+' ¥'+Number(r[pi]).toLocaleString('en')+' (budget ¥'+budget.toLocaleString('en')+')');
  });
  SpreadsheetApp.flush();refreshCatalogueNow();
  console.log('Switched on '+enabled+' more gift(s). Every gift with a name is now enabled.');
  if(kept.length)console.log('Kept off (same product as a newer row): '+kept.join(', '));
- if(over.length)console.log('⚠️ Over the ¥'+GIFT_BUDGET_YEN.toLocaleString('en')+' budget: '+over.join(', ')+'. Untick Enabled if you do not want them.');
+ if(over.length)console.log('⚠️ Over budget: '+over.join(', ')+'. Untick Enabled if you do not want them.');
 }
+function isSpecial_(v){return /^(special|prize)/i.test(text_(v));}
 function readSettings_(){
  const sh=giftBook_().getSheetByName(SETTINGS_TAB);
  const map={};
@@ -257,7 +271,7 @@ function lookup_(code){
  return value;
 }
 function lookupValue_(entry,row,cart){
- return {label:entry.label,message:entry.message||'',selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
+ return {label:entry.label,message:entry.message||'',prize:!!entry.prize,selection:row&&row[3]?maskSelection_(selection_(row)):null,saved:row?savedIds_(row[25]):[],cart:text_(cart)};
 }
 // Pre-load: keeps the gift list, the guest list and every couple's (partly hidden) details ready in the cache, so a
 // guest's code check rarely has to open a spreadsheet. Runs with the every-minute email helper; when everything is
@@ -358,9 +372,10 @@ function submit_(p){
  if(deadlinePassed_(catalogue.deadline))throw fault_('The selection period has ended.',409,'ended');
  if(p.consent!==true)throw fault_('Please agree to the use of your delivery details.',400,'invalid');
  const d=validateDelivery_(p.data);
- const gift=catalogue.gifts.find(g=>g.id===d.gift_id&&g.enabled);
- if(!gift)throw fault_('That gift is no longer available. Please choose another.',409,'unavailable');
  const entry=registryEntry_(code);
+ // Prize codes may only choose special gifts, guest codes only the normal ones.
+ const gift=catalogue.gifts.find(g=>g.id===d.gift_id&&g.enabled&&!!g.special===!!entry.prize);
+ if(!gift)throw fault_('That gift is no longer available. Please choose another.',409,'unavailable');
  const sheet=couplesSheet_(true);
  const found=ensureCoupleRow_(sheet,entry),row=found.value;
  if(['Awaiting choice','Requested',''].indexOf(text_(row[11]))<0)throw fault_('Your gift is already being prepared. Contact Htoo & May to change it.',409,'locked');
@@ -546,9 +561,61 @@ function rsvpRegistry_(){
   const message=mi>=0?String(r[mi]==null?'':r[mi]).replace(/\r\n?/g,'\n').trim().slice(0,GIFT_MESSAGE_MAX):'';
   result.set(code,{code,names:unique,label:unique.join(' & '),message});
  });
+ prizeEntries_().forEach(entry=>{if(result.has(entry.code))duplicates.add(entry.code);else result.set(entry.code,entry);});
  // A code on two rows is ambiguous: block it until the organiser fixes the RSVP sheet.
  duplicates.forEach(code=>{console.warn('Gift code '+code+' appears on more than one RSVP row and is blocked.');result.delete(code);});
  return result;
+}
+// Prize cards (Gift Manager › Prize codes). Each prize code is its own "couple" on the Couples tab once used,
+// named after its Prize cell, so orders, emails and Status work exactly like a normal gift.
+function prizeEntries_(){
+ const sh=giftBook_().getSheetByName(PRIZE_TAB);if(!sh||sh.getLastRow()<2)return [];
+ const out=[];
+ sh.getRange(2,1,sh.getLastRow()-1,3).getValues().forEach((r,i)=>{
+  const code=text_(r[0]).replace(/[\s-]/g,'').toUpperCase();if(!code)return;
+  if(text_(r[2])!==''&&!bool_(r[2]))return;
+  if(!/^[A-Z0-9]{6,40}$/.test(code)){console.warn('Prize codes row '+(i+2)+': invalid code skipped.');return;}
+  const name=text_(r[1])||'Game prize';
+  out.push({code,names:[name],label:name,message:'',prize:true});
+ });
+ return out;
+}
+// One click: adds the Group column to the Catalogue (write Special for prize gifts) and the Prize codes tab with
+// PRIZE_CARDS codes for the prize cards. Safe to run again: existing codes are kept, missing ones are added.
+function isPrizeCode_(code){const c=text_(code).replace(/[\s-]/g,'').toUpperCase();try{return prizeEntries_().some(e=>e.code===c);}catch(_){return false;}}
+function setupPrizeGifts(){
+ const lock=LockService.getScriptLock();lock.waitLock(20000);
+ try{
+  const book=giftBook_(),cat=book.getSheetByName(CATALOGUE_TAB);
+  if(!cat)throw new Error('No Catalogue tab. Run setupGiftStandalone first.');
+  const catHeaders=cat.getRange(1,1,1,Math.max(1,cat.getLastColumn())).getValues()[0].map(text_);
+  if(catHeaders.indexOf(CATALOGUE_GROUP_HEADER)<0){
+   const column=catHeaders.length+1;if(column>cat.getMaxColumns())cat.insertColumnsAfter(cat.getMaxColumns(),1);
+   cat.getRange(1,column).setValue(CATALOGUE_GROUP_HEADER).setNote('Write Special for a prize gift (only prize codes see it). Leave empty for normal gifts.');
+  }
+  let sh=book.getSheetByName(PRIZE_TAB);
+  if(!sh){sh=book.insertSheet(PRIZE_TAB);sh.getRange(1,1,1,PRIZE_HEADERS.length).setValues([PRIZE_HEADERS]);sh.setFrozenRows(1);}
+  const last=sh.getLastRow(),rows=last<2?[]:sh.getRange(2,1,last-1,PRIZE_HEADERS.length).getValues();
+  const norm=v=>text_(v).replace(/[\s-]/g,'').toUpperCase();
+  const existing=new Set(rows.map(r=>norm(r[0])).filter(Boolean));
+  const rsvp=ensureRsvpColumns_();
+  if(rsvp.sh.getLastRow()>=2)rsvp.sh.getRange(2,codeColumn_(rsvp.headers)+1,rsvp.sh.getLastRow()-1,1).getValues().forEach(r=>{const c=norm(r[0]);if(c)existing.add(c);});
+  let have=rows.filter(r=>norm(r[0])).length,added=0;
+  const fresh=[];
+  while(have<PRIZE_CARDS){
+   const code=newGiftCode_(existing);existing.add(code);have++;added++;
+   fresh.push([displayCode_(code),'Game prize '+have,true,GIFT_ORIGIN+'/#code='+code,'']);
+  }
+  if(fresh.length){
+   const start=Math.max(2,sh.getLastRow()+1);
+   sh.getRange(start,1,fresh.length,1).setNumberFormat('@');
+   sh.getRange(start,1,fresh.length,PRIZE_HEADERS.length).setValues(fresh);
+   sh.getRange(start,3,fresh.length,1).insertCheckboxes();
+  }
+  SpreadsheetApp.flush();refreshCatalogueNow();
+  console.log('Prize gifts ready. '+added+' new prize code(s) added; '+have+' in the Prize codes tab. Mark prize gifts with Special in Catalogue › '+CATALOGUE_GROUP_HEADER+' (budget ¥'+PRIZE_BUDGET_YEN.toLocaleString('en')+').');
+  console.log('Untick Enabled in Prize codes to switch a card off. You can rename a Prize (e.g. "Bouquet toss winner"): the winner sees that name.');
+ }finally{lock.releaseLock();}
 }
 function ensureRsvpColumns_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
@@ -809,7 +876,8 @@ function checkGiftSetup(){
   if(short.length)console.log('⚠️ '+short.length+' code(s) are shorter than '+GIFT_CODE_LENGTH+' characters and could be guessed. Clear those code cells in RSVPs and run issueGiftCodesForAllGuests to replace them.');
   const wrong=Number(PropertiesService.getScriptProperties().getProperty('WRONG_CODES_'+japanDay_()))||0;
   if(wrong)console.log('ℹ️ Wrong codes tried today: '+wrong+'.');
-  return registry.size+' guest code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
+  const prizes=Array.from(registry.values()).filter(e=>e.prize).length;
+  return (registry.size-prizes)+' guest code(s) and '+prizes+' prize code(s) can log in (attending, enabled, valid, not duplicated). Skipped rows are listed above as warnings.';
  });
  step('Couples tab (Gift Manager)',()=>{
   const sheet=couplesSheet_();
@@ -835,7 +903,8 @@ function checkGiftSetup(){
   const gifts=readCatalogue_(),enabled=gifts.filter(g=>g.enabled);
   if(!enabled.length)throw new Error('No enabled gifts. Tick Enabled for at least one row.');
   const noImage=enabled.filter(g=>!g.image).map(g=>g.id);
-  return gifts.length+' gift(s), '+enabled.length+' enabled'+(noImage.length?'; missing Image: '+noImage.join(', '):'');
+  const special=enabled.filter(g=>g.special).length;
+  return gifts.length+' gift(s), '+enabled.length+' enabled ('+special+' special prize gift(s))'+(noImage.length?'; missing Image: '+noImage.join(', '):'');
  });
  step('Website catalogue response',()=>{refreshCatalogueNow();const json=JSON.stringify(publicCatalogue_());return json.length+' characters, OK';});
  step('Script properties',()=>{giftSheetId_();rsvpSheetId_();return 'GIFT_SHEET_ID and RSVP_SHEET_ID set';});
@@ -851,6 +920,7 @@ function checkGiftSetup(){
 const MAIL={burgundy:'#7c3241',cream:'#fbf5e9',paper:'#f3ebdd',gold:'#b4935d',ink:'#3f362e',muted:'#746965'};
 function guestEmail_(r,language){
  const my=language==='my',code=text_(r[0]);
+ const prize=isPrizeCode_(code);
  const t=my?{
   title:'လက်ဆောင်ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ',hello:'ချစ်လှစွာသော '+invite_(r).label+'၊',
   intro:'ကျွန်တော်တို့ရဲ့ မင်္ဂလာနေ့ကို လာရောက်ချီးမြှင့်ပေးလို့ ကျေးဇူးအများကြီးတင်ပါတယ်။ သင်ရွေးထားတဲ့ လက်ဆောင်ကို လက်ခံရရှိပါပြီ။ ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။',
@@ -864,6 +934,12 @@ function guestEmail_(r,language){
   button:'View my gift',change:'You can change your choice within 48 hours of your first confirmation, until it is ordered.',
   footer:'This is an automated confirmation. Please do not reply to this email. For help, contact Htoo or May directly.',love:'With love, Htoo & May'
  };
+ // Prize cards: greet the winner by the recipient name they entered, not the card name ("Game prize 1").
+ if(prize){
+  t.hello=my?'ချစ်လှစွာသော '+text_(r[5])+'၊':'Dear '+text_(r[5])+',';
+  t.intro=my?'ဂိမ်းမှာ အနိုင်ရလို့ ဂုဏ်ယူပါတယ်။ သင်ရွေးထားတဲ့ ဆုလက်ဆောင်ကို လက်ခံရရှိပြီး ပို့ဆောင်ပေးဖို့ စီစဉ်ပါမယ်။ ငွေပေးချေရန် မလိုပါ။':'Congratulations on your win! We have received your prize choice, and we will arrange delivery. No payment is required.';
+  t.title=my?'ဆုလက်ဆောင် ရွေးချယ်မှု အတည်ပြုပြီးပါပြီ':'Your prize gift is confirmed';
+ }
  const link=GIFT_ORIGIN+'/#code='+encodeURIComponent(code)+'&view=order';
  const font=my?"'Noto Sans Myanmar','Myanmar Text',Padauk,Arial,sans-serif":'Georgia,\'Times New Roman\',serif';
  const body=my?"'Noto Sans Myanmar','Myanmar Text',Padauk,Arial,sans-serif":'Arial,Helvetica,sans-serif';

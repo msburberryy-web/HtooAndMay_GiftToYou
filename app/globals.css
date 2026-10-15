@@ -335,6 +335,7 @@ body{font-family:'Manrope',Arial,sans-serif}
 /* Under the couple's names: a quiet check that the card belongs to them */
 .guest-welcome .not-you{margin:2px 0 4px;font-size:13px;color:#6f6257;font-style:italic}
 .burmese .guest-welcome .not-you{font-style:normal}
+.guest-welcome .prize-badge{display:inline-block;margin:0 0 4px;padding:3px 12px;border:1px solid #b4935d;border-radius:999px;background:#fbf5e9;color:#7c3241;font-size:13px;letter-spacing:.06em}
 
 /* Hobby category tabs: one scrollable row on phones instead of wrapping */
 .filters{max-width:100%;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;flex-wrap:nowrap}

@@ -1,7 +1,7 @@
 // Hobby categories, in tab order (must match GIFT_CATEGORIES in setup/Code.gs).
 export const GIFT_CATEGORIES=['Camping','Camera','Kitchen','The living','Coffee','Travel','Beauty','Relaxation'] as const;
 export function giftCategories(g:{category:string;categories?:string[]}){return g.categories&&g.categories.length?g.categories:g.category?[g.category]:[]}
-export type Gift={id:string;brand:string;name:string;category:string;categories?:string[];description:string;details:string;image:string;srcSet?:string;price:number;enabled:boolean};
+export type Gift={id:string;brand:string;name:string;category:string;categories?:string[];description:string;details:string;image:string;srcSet?:string;price:number;enabled:boolean;special?:boolean};
 export const gifts:Gift[]=[
 {id:'kinto',brand:'KINTO',name:'Travel tumbler · 500ml',category:'Travel',categories:['Travel','Coffee'],description:'A little companion for wherever the day takes you.',details:'An insulated stainless steel travel tumbler. The pictured colour is white.',image:'https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/kinto.jpg',price:3520,enabled:false},
 {id:'iittala',brand:'iittala',name:'Aino Aalto · two glasses',category:'Kitchen',categories:['Kitchen'],description:'Two glasses, for everyday moments worth sharing.',details:'A pair of 220ml Aino Aalto tumblers in clear glass.',image:'https://htoo-may-gift-edit.the-studioeternelle.chatgpt.site/products/iittala.jpg',price:4400,enabled:false},

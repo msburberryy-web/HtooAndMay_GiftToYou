@@ -161,7 +161,7 @@ test('checkGiftSetup reports success, and names the broken part', () => {
   s.ctx.console.log = m => lines.push(m);
   s.ctx.checkGiftSetup();
   assert.match(lines.at(-1), /All checks passed/, lines.join('\n'));
-  assert.ok(lines.some(l => /2 guest code\(s\) can log in/.test(l)));
+  assert.ok(lines.some(l => /2 guest code\(s\) and 0 prize code\(s\) can log in/.test(l)));
   s.book.sheets.Catalogue.data[0][0] = 'Gift ID';
   lines.length = 0;
   s.ctx.checkGiftSetup();
@@ -724,7 +724,51 @@ test('enableAllGifts: every named gift on, replaced duplicates kept off, over-bu
   assert.equal(on('snowpeak'), true);
   assert.equal(on('towel'), false, 'old row for the same towel stays off');
   assert.equal(on('iittala'), false);
-  assert.ok(lines.some(l => /Over the ¥3,500 budget: .*lecreuset ¥3,850/.test(l)), lines.join('\n'));
+  assert.ok(lines.some(l => /Over budget: .*lecreuset ¥3,850 \(budget ¥3,500\)/.test(l)), lines.join('\n'));
   const ids = s.post({action: 'catalogue'}).data.gifts.filter(g => g.enabled).map(g => g.id);
   assert.ok(ids.includes('imabari-shifuku-face-pair') && ids.includes('bodum') && !ids.includes('towel'));
+});
+
+test('prize cards: prize codes see only special gifts, guest codes never get them, winners get their own email', () => {
+  const s = setup();
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.setupPrizeGifts();
+  const tab = s.book.sheets['Prize codes'];
+  assert.equal(tab.data.length, 11, 'header + 10 prize codes');
+  assert.match(String(tab.data[1][0]), /^[2-9A-HJKMNP-Z]{5}-[2-9A-HJKMNP-Z]{5}$/);
+  assert.equal(tab.data[1][1], 'Game prize 1');
+  s.ctx.setupPrizeGifts();
+  assert.equal(tab.data.length, 11, 'running again keeps the same codes');
+  const cat = s.book.sheets.Catalogue, h = cat.data[0];
+  assert.ok(h.includes('Group'), 'Group column added');
+  cat.data.push(h.map(x => ({ID: 'prize-bag', Brand: 'Brand', Name: 'Prize bag', Category: 'Travel', Price: 4800, Enabled: true, Group: 'Special'})[x] ?? ''));
+  s.setSetting('Open', true);
+  const gifts = s.post({action: 'catalogue'}).data.gifts;
+  assert.equal(gifts.find(g => g.id === 'prize-bag').special, true);
+  assert.equal(gifts.find(g => g.id === 'hario-mug').special, false);
+  const prize = String(tab.data[1][0]).replace('-', '');
+  const look = s.post({action: 'lookup', code: prize});
+  assert.equal(look.ok, true);
+  assert.equal(look.data.prize, true);
+  assert.equal(look.data.label, 'Game prize 1');
+  assert.equal(s.post({action: 'lookup', code: s.codeOf(2)}).data.prize, false);
+  // A prize code cannot take a normal gift, and a guest code cannot take a prize gift.
+  const take = (code, gift_id) => s.post({action: 'submit', code, consent: true, language: 'en', data: {...delivery, gift_id}});
+  assert.equal(take(prize, 'hario-mug').reason, 'unavailable');
+  assert.equal(take(s.codeOf(2), 'prize-bag').reason, 'unavailable');
+  const won = take(prize, 'prize-bag');
+  assert.equal(won.ok, true, JSON.stringify(won));
+  const row = s.couples.data.find(r => r[0] === prize);
+  assert.equal(row[1], 'Game prize 1');
+  assert.equal(row[11], 'Requested');
+  const email = s.mail.find(m => /Congratulations on your win/.test(m.body || m.htmlBody || ''));
+  assert.ok(email, 'winner gets the prize email');
+  assert.ok(/Dear Aye Aye,/.test(email.htmlBody), 'greets the recipient, not the card name');
+  // The winner's own guest code still chooses a normal gift.
+  assert.equal(take(s.codeOf(2), 'hario-mug').ok, true);
+  // Switching a card off stops it working.
+  tab.data[2][2] = false; s.ctx.refreshCatalogueNow();
+  assert.equal(s.post({action: 'lookup', code: String(tab.data[2][0]).replace('-', '')}).reason, 'not_found');
+  lines.length = 0; s.ctx.enableAllGifts();
+  assert.ok(!lines.some(l => /prize-bag/.test(l)), 'within the ¥5,000 prize budget');
 });
