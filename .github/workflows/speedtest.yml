@@ -14,7 +14,7 @@ jobs:
             curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"$a\"}" "$URL" -o r.json
             python3 -c "import json;d=json.load(open('r.json'));c=d.get('data',d).get('catalogue',d.get('data',{}));g=c.get('gifts',[]);print('$a ok:',d.get('ok'),'| gifts:',len(g),'| enabled:',sum(1 for x in g if x.get('enabled')))"
             echo "$a has \"source\" field: $(grep -c '\"source\"' r.json)"
-            echo "$a has shop links: $(grep -Eoc "$SHOPS" r.json)"
+            echo "$a buying links: $(grep -Eo "https?://[^\\\"]*($SHOPS)" r.json | wc -l)"
           done
           curl -sL -H 'Content-Type: text/plain' --data '{"action":"lookup","code":"E1FC7462A5DA4CBC9B42"}' "$URL" | python3 -c "import json,sys;d=json.load(sys.stdin);print('old code ok:',d.get('ok'),'reason:',d.get('reason'))"
       - name: Website has no shop links
@@ -23,4 +23,4 @@ jobs:
           curl -sL "$SITE" -o index.html
           for js in $(grep -Eo 'assets/[^"]+\.js' index.html); do curl -sL "$SITE$js" >> all.js; done
           echo "site JS bytes: $(wc -c < all.js)"
-          echo "site shop links: $(grep -Eoc 'milpoche|hariocorp|kinto\.co|snowpeak|iittala\.jp|lecreuset|imabari-kinsei|bodumshop' all.js)"
+          echo "site buying links: $(grep -Eo 'https?://[^`\"]*(milpoche|hariocorp|kinto\.co|ec\.snowpeak|iittala\.jp|lecreuset-japon|imabari-kinsei|bodumshop)' all.js | wc -l)"
