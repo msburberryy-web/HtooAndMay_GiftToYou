@@ -70,7 +70,13 @@ const PRIZE_BUDGET_YEN = 5000;
 // Every attempt is written to the Login log tab. After NAME_TRIES wrong names the card pauses for NAME_LOCK_MINUTES.
 // A prize card with an empty Winner accepts the first name typed and writes it into Prize codes › Winner.
 const LOGIN_TAB = 'Login log';
-const LOGIN_HEADERS = ['Time (Japan)','Code','Names on file','Typed name','Result','Tries left'];
+const LOGIN_HEADERS = ['Time (Japan)','Code','Names on file','Typed name or email','Result','Tries left'];
+// Email login: a guest may type the email they gave us instead of the code. Emails come from RSVPs › Gift email
+// and from the guest list tab below (column "Mail and Address"), where each guest is linked to their card by name
+// (the same names the name check accepts, incl. Accepted names). Signing in by email skips the name step.
+const GUEST_LIST_TAB = 'Finalize Guest List';
+const GUEST_LIST_EMAIL_HEADER = 'Mail and Address';
+const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 const NAME_TRIES = 3;
 const NAME_LOCK_MINUTES = 30;
 // Titles ignored when comparing names ("Ko Nyan" = "Nyan"). Only at the start of a name.
@@ -142,6 +148,7 @@ function doPost(e){
   if(action==='lookup'&&codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
   if(action==='lookup'){const code=normalizeCode_(p.code);registryEntry_(code);requirePass_(p,code);return output_({ok:true,data:lookup_(code)});}
   if(action==='verify')return output_({ok:true,data:verify_(p)});
+  if(action==='login')return output_({ok:true,data:emailLogin_(p)});
   // First visit: the gift list and (when a code is given) the guest's details in one request.
   if(action==='init'){
    const out={catalogue:publicCatalogue_()};
@@ -558,7 +565,7 @@ function rsvpRegistry_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw fault_('RSVPs tab not found.',503,'service');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)'),mi=headers.indexOf('Gift message'),xi=headers.indexOf('Accepted names');
+ const ci=codeColumn_(headers),di=headers.indexOf('Gift display name'),ei=headers.indexOf('Gift enabled'),ai=headers.indexOf('Attending'),ni=headers.indexOf('Name'),gi=headers.indexOf('Guest name(s)'),mi=headers.indexOf('Gift message'),xi=headers.indexOf('Accepted names'),ki=headers.indexOf('Gift email');
  if(ci<0||ai<0)throw fault_('Run setupGiftStandalone to add the Gift code column to RSVPs.',503,'service');
  const rows=sh.getLastRow()<2?[]:sh.getRange(2,1,sh.getLastRow()-1,headers.length).getValues();
  const result=new Map(),duplicates=new Set();
@@ -577,8 +584,10 @@ function rsvpRegistry_(){
   const message=mi>=0?String(r[mi]==null?'':r[mi]).replace(/\r\n?/g,'\n').trim().slice(0,GIFT_MESSAGE_MAX):'';
   // Names a guest may type at the name check (any of them is enough).
   const accept=[main,gi>=0?text_(r[gi]):'',override,xi>=0?text_(r[xi]):''].filter(Boolean);
-  result.set(code,{code,names:unique,label:unique.join(' & '),message,accept});
+  const emails=ki>=0?emailsIn_(r[ki]):[];
+  result.set(code,{code,names:unique,label:unique.join(' & '),message,accept,emails});
  });
+ addGuestListEmails_(result);
  prizeEntries_().forEach(entry=>{if(result.has(entry.code))duplicates.add(entry.code);else result.set(entry.code,entry);});
  // A code on two rows is ambiguous: block it until the organiser fixes the RSVP sheet.
  duplicates.forEach(code=>{console.warn('Gift code '+code+' appears on more than one RSVP row and is blocked.');result.delete(code);});
@@ -641,6 +650,41 @@ function verify_(p){
  logLogin_(code,entry,typed,result,'');
  return {pass:passFor_(code),lookup:lookup_(code)};
 }
+function emailsIn_(v){return (String(v==null?'':v).match(EMAIL_PATTERN)||[]).map(e=>e.toLowerCase());}
+// Guest list tab: every block starts with a "Guest Names" header row; the email column is found by its header.
+// A guest is linked to the one card whose names match theirs; a name that matches no card, or several, is skipped.
+function addGuestListEmails_(registry){
+ try{
+  const sh=rsvpBook_().getSheetByName(GUEST_LIST_TAB);if(!sh||sh.getLastRow()<2)return;
+  const cards=Array.from(registry.values());
+  let ei=-1,linked=0;const unmatched=[];
+  sh.getDataRange().getValues().forEach(r=>{
+   const first=text_(r[0]);
+   if(first==='Guest Names'){ei=r.map(text_).indexOf(GUEST_LIST_EMAIL_HEADER);return;}
+   if(ei<0||!first)return;
+   const emails=emailsIn_(r[ei]);if(!emails.length)return;
+   const hits=cards.filter(c=>nameMatches_(first,c.accept||[]));
+   if(hits.length!==1){unmatched.push(first);return;}
+   emails.forEach(e=>{if(hits[0].emails.indexOf(e)<0)hits[0].emails.push(e);});linked++;
+  });
+  if(unmatched.length)console.warn('Guest list emails not linked to a card (add the name to RSVPs › Accepted names): '+unmatched.join(', '));
+ }catch(error){console.warn('Guest list emails skipped: '+(error.message||error));}
+}
+function emailLogin_(p){
+ if(codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
+ const email=String(p.email==null?'':p.email).normalize('NFKC').trim().toLowerCase();
+ if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)throw fault_('Please check your email address.',400,'invalid');
+ const cache=CacheService.getScriptCache(),key=cacheKey_('registry-v4');
+ let registry=null;const hit=cache.get(key);
+ if(hit)registry=new Map(JSON.parse(hit));
+ let cards=registry?Array.from(registry.values()).filter(c=>(c.emails||[]).indexOf(email)>=0):[];
+ if(!cards.length){registry=rsvpRegistry_();cards=Array.from(registry.values()).filter(c=>(c.emails||[]).indexOf(email)>=0);}
+ if(!cards.length)throw fault_('We could not find that email. Please use the email you gave us when you replied, or the code on your card.',404,'not_found');
+ if(cards.length>1)throw fault_('This email is on more than one card. Please use the code on your card.',409,'ambiguous');
+ const entry=cards[0];
+ logLogin_(entry.code,entry,email,'Email login','');
+ return {code:entry.code,pass:passFor_(entry.code),lookup:lookup_(entry.code)};
+}
 function lockedFault_(){const e=fault_('For your security, this card is paused for '+NAME_LOCK_MINUTES+' minutes. Please contact Htoo & May if you need help.',429,'name_locked');e.triesLeft=0;return e;}
 // Forgiving comparison: case, spaces, punctuation and titles (U, Daw, Ko, Ma…) are ignored, word order does not
 // matter, and a small typo is allowed in longer names. A name on file like "Ko Nyan (or) Nyan Linn Aung" or
@@ -675,7 +719,7 @@ function logLogin_(code,entry,typed,result,triesLeft){
   if(!sh){sh=book.insertSheet(LOGIN_TAB);sh.getRange(1,1,1,LOGIN_HEADERS.length).setValues([LOGIN_HEADERS]);sh.setFrozenRows(1);}
   const onFile=(entry.accept&&entry.accept.length?entry.accept.join(' / '):'')||(entry.prize?entry.label+' (no winner yet)':entry.label);
   sh.appendRow([japanNow_(),displayCode_(code),cell_(onFile),cell_(typed),result,triesLeft===''?'':String(triesLeft)]);
-  if(result!=='Match'){const row=sh.getLastRow();sh.getRange(row,1,1,LOGIN_HEADERS.length).setBackground(/winner/.test(result)?'#fdf3d8':'#f8d7da');}
+  if(result!=='Match'&&result!=='Email login'){const row=sh.getLastRow();sh.getRange(row,1,1,LOGIN_HEADERS.length).setBackground(/winner/.test(result)?'#fdf3d8':'#f8d7da');}
  }catch(error){console.warn('Login log not written: '+(error.message||error));}
 }
 // First name typed on a prize card becomes its Winner (only while the Winner cell is empty).
@@ -735,7 +779,7 @@ function ensureRsvpColumns_(){
  const sh=rsvpBook_().getSheetByName(RSVP_TAB);
  if(!sh)throw new Error('RSVPs tab not found.');
  const headers=sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0].map(text_);
- ['Gift code','Gift display name','Gift QR link','Gift enabled','Gift message','Accepted names'].forEach(name=>{
+ ['Gift code','Gift display name','Gift QR link','Gift enabled','Gift message','Accepted names','Gift email'].forEach(name=>{
   if(name==='Gift code'&&codeColumn_(headers)>=0)return;
   if(headers.indexOf(name)>=0)return;
   const column=headers.length+1;if(column>sh.getMaxColumns())sh.insertColumnsAfter(sh.getMaxColumns(),1);

@@ -2,7 +2,7 @@ import {DEFAULT_GIFT_API_URL} from './endpoint';
 
 export const GIFT_API_URL: string = import.meta.env.VITE_GIFT_API_URL || DEFAULT_GIFT_API_URL;
 
-export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network' | 'name_required' | 'name_mismatch' | 'name_locked';
+export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network' | 'name_required' | 'name_mismatch' | 'name_locked' | 'ambiguous';
 
 export class ApiError extends Error {
   constructor(message: string, readonly status: number, readonly reason: ApiReason, readonly triesLeft?: number) {
