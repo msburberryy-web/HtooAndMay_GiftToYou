@@ -6,23 +6,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Prize and guest codes live (lookup only, no orders)
+      - name: Name check and email sign-in (no real emails or names used)
         run: |
           URL='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
-          look() { curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"lookup\",\"code\":\"$1\"}" "$URL"; }
-          echo "--- prize card (Game prize 10)"
-          look FEPGHG7YAJ | python3 -c "import json,sys;d=json.load(sys.stdin);x=d.get('data') or {};print('ok:',d.get('ok'),'| prize:',x.get('prize'),'| has prizeName field:','prizeName' in x,'| label is a Game prize:',str(x.get('label','')).startswith('Game prize'),'| reason:',d.get('reason'))"
-          echo "--- prize card with dash and lower case"
-          look fephg-g7yaj | python3 -c "import json,sys;d=json.load(sys.stdin);print('ok:',d.get('ok'),'| prize:',(d.get('data') or {}).get('prize'))"
-          echo "--- guest card"
-          look 55G6TVYXSY | python3 -c "import json,sys;d=json.load(sys.stdin);x=d.get('data') or {};print('ok:',d.get('ok'),'| prize:',x.get('prize'),'| has label:',bool(x.get('label')),'| reason:',d.get('reason'))"
-          echo "--- guest code cannot order a prize gift (request refused before saving: no consent flag)"
-          curl -sL -H 'Content-Type: text/plain' --data '{"action":"submit","code":"55G6TVYXSY","consent":false,"data":{}}' "$URL" | python3 -c "import json,sys;d=json.load(sys.stdin);print('ok:',d.get('ok'),'| reason:',d.get('reason'))"
-          echo "--- catalogue"
-          curl -sL -H 'Content-Type: text/plain' --data '{"action":"catalogue"}' "$URL" | python3 -c "import json,sys;g=json.load(sys.stdin)['data']['gifts'];print('special enabled:',sum(1 for x in g if x['enabled'] and x.get('special')),'| normal enabled:',sum(1 for x in g if x['enabled'] and not x.get('special')))"
+          post() { curl -sL -H 'Content-Type: text/plain' --data "$1" "$URL"; }
+          show() { python3 -c "import json,sys;d=json.load(sys.stdin);x=d.get('data') or {};print('  ok:',d.get('ok'),'| reason:',d.get('reason'),'| keys:',sorted(x.keys()) if isinstance(x,dict) else '-')"; }
+          echo "1 catalogue";            post '{"action":"catalogue"}' | python3 -c "import json,sys;d=json.load(sys.stdin);g=d['data']['gifts'];print('  ok:',d['ok'],'| open:',d['data']['open'],'| enabled:',sum(x['enabled'] for x in g))"
+          echo "2 lookup, code only";    post '{"action":"lookup","code":"55G6TVYXSY"}' | show
+          echo "3 init, code only";      post '{"action":"init","code":"55G6TVYXSY"}' | python3 -c "import json,sys;d=json.load(sys.stdin)['data'];print('  has catalogue:',bool(d.get('catalogue')),'| has guest data:','lookup' in d,'| lookupError:',(d.get('lookupError') or {}).get('reason'))"
+          echo "4 submit, forged pass";  post '{"action":"submit","code":"55G6TVYXSY","pass":"forged","consent":true,"data":{}}' | show
+          echo "5 save, no pass";        post '{"action":"save","code":"55G6TVYXSY","saved":[]}' | show
+          echo "6 verify, unknown code"; post '{"action":"verify","code":"ZZZZZ99999","name":"Test"}' | show
+          echo "7 login, unknown email"; post '{"action":"login","email":"nobody.test@example.invalid"}' | show
+          echo "8 login, not an email";  post '{"action":"login","email":"hello"}' | show
+          echo "9 lookup, unknown code"; post '{"action":"lookup","code":"ZZZZZ99999"}' | show
       - name: Website version
         run: |
           SITE='https://msburberryy-web.github.io/HtooAndMay_GiftToYou/'
           curl -sL "$SITE" -o index.html
           for js in $(grep -Eo 'assets/[^"]+\.js' index.html); do curl -sL "$SITE$js" >> all.js; done
-          echo "winner screen in site: $(grep -c 'Prize for {game}' all.js)"
+          echo "name page: $(grep -c 'Please confirm your name' all.js) | email box: $(grep -c 'Your email or gift code' all.js) | boot sends pass: $(grep -c 'gift-pass-' index.html)"
