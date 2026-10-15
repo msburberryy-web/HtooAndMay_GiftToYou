@@ -6,27 +6,23 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - name: Prize gifts live
+      - name: Prize and guest codes live (lookup only, no orders)
         run: |
           URL='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
-          curl -sL -H 'Content-Type: text/plain' --data '{"action":"catalogue"}' "$URL" -o c.json
-          python3 - <<'PY'
-          import json
-          d=json.load(open('c.json'));c=d['data'];g=c['gifts']
-          print('ok',d['ok'],'| open',c['open'],'| gifts',len(g),'| enabled',sum(x['enabled'] for x in g))
-          print('has special field:',all('special' in x for x in g),'| has source field:',any('source' in x for x in g))
-          for x in g:
-            if x.get('special'): print('SPECIAL',x['id'],'| enabled',x['enabled'],'| ¥',x['price'],'|',','.join(x['categories']),'| image',x['image'])
-          print('normal enabled:',[x['id'] for x in g if x['enabled'] and not x.get('special')])
-          PY
-          for code in ABCDE23456 ZZZZZ99999; do curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"lookup\",\"code\":\"$code\"}" "$URL" | python3 -c "import json,sys;d=json.load(sys.stdin);print('fake code ok:',d.get('ok'),d.get('reason'))"; done
-      - name: Website has prize code and photos
+          look() { curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"lookup\",\"code\":\"$1\"}" "$URL"; }
+          echo "--- prize card (Game prize 10)"
+          look FEPGHG7YAJ | python3 -c "import json,sys;d=json.load(sys.stdin);x=d.get('data') or {};print('ok:',d.get('ok'),'| prize:',x.get('prize'),'| has prizeName field:','prizeName' in x,'| label is a Game prize:',str(x.get('label','')).startswith('Game prize'),'| reason:',d.get('reason'))"
+          echo "--- prize card with dash and lower case"
+          look fephg-g7yaj | python3 -c "import json,sys;d=json.load(sys.stdin);print('ok:',d.get('ok'),'| prize:',(d.get('data') or {}).get('prize'))"
+          echo "--- guest card"
+          look 55G6TVYXSY | python3 -c "import json,sys;d=json.load(sys.stdin);x=d.get('data') or {};print('ok:',d.get('ok'),'| prize:',x.get('prize'),'| has label:',bool(x.get('label')),'| reason:',d.get('reason'))"
+          echo "--- guest code cannot order a prize gift (request refused before saving: no consent flag)"
+          curl -sL -H 'Content-Type: text/plain' --data '{"action":"submit","code":"55G6TVYXSY","consent":false,"data":{}}' "$URL" | python3 -c "import json,sys;d=json.load(sys.stdin);print('ok:',d.get('ok'),'| reason:',d.get('reason'))"
+          echo "--- catalogue"
+          curl -sL -H 'Content-Type: text/plain' --data '{"action":"catalogue"}' "$URL" | python3 -c "import json,sys;g=json.load(sys.stdin)['data']['gifts'];print('special enabled:',sum(1 for x in g if x['enabled'] and x.get('special')),'| normal enabled:',sum(1 for x in g if x['enabled'] and not x.get('special')))"
+      - name: Website version
         run: |
           SITE='https://msburberryy-web.github.io/HtooAndMay_GiftToYou/'
           curl -sL "$SITE" -o index.html
           for js in $(grep -Eo 'assets/[^"]+\.js' index.html); do curl -sL "$SITE$js" >> all.js; done
-          echo "prize text in site: $(grep -c 'Congratulations, winner' all.js)"
-          for id in prize-lecreuset-short-tumbler-pair prize-costanova-mug-pair prize-bodum-double-wall-pair prize-kaneko-rinka-plate-pair prize-gelatopique-towel-soap prize-sabon-body-care-b prize-johnmasters-gift-b; do
-            for f in "product-photos/$id-800.webp" "product-photos/$id-400.webp" "products/$id-800.webp"; do s=$(curl -s -o /dev/null -w '%{http_code}' "$SITE$f"); [ "$s" = 200 ] && { echo "$id photo OK ($f)"; break; }; done
-          done
-          grep -Eo '[a-z/]*photos?[a-z/-]*/\$\{[^}]*\}[^`"]*' all.js | head -3
+          echo "winner screen in site: $(grep -c 'Prize for {game}' all.js)"
