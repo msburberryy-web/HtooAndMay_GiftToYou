@@ -1,29 +1,26 @@
-# Temporary: looks up an Aesop gift kit on the Japanese site (title and price only).
-name: Live speed test
+name: Live check
 on:
   push:
-    branches: ["speedtest/live"]
-permissions:
-  contents: read
+    branches: [speedtest/live]
 jobs:
-  measure:
+  check:
     runs-on: ubuntu-latest
     steps:
-      - name: Aesop Japan
+      - name: Buying links are private
         run: |
-          UA='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36'
-          for u in \
-            https://www.aesop.com/jp/gifts/seasonal-gift-kits/greetings-in-the-guest-room/APB364JP.html \
-            https://www.aesop.com/jp/gifts/seasonal-gift-kits/ \
-            https://www.aesop.com/jp/gifts/kits-and-sets/ ; do
-            code=$(curl -sS -L -m 60 -A "$UA" -H 'Accept-Language: ja' -o p.html -w '%{http_code}' "$u"); echo "== $code $u"
-            python3 - <<'PY'
-          import re,html
-          s=open('p.html',encoding='utf-8',errors='replace').read()
-          t=re.search(r'(?is)<title>(.*?)</title>',s); print('TITLE:',html.unescape(t.group(1)).strip()[:120] if t else '-')
-          for m in re.finditer(r'"name"\s*:\s*"([^"]{3,80})"[^{}]{0,400}?"price"\s*:\s*"?([\d.,]+)',s): print('  ITEM:',m.group(1),'¥',m.group(2))
-          for m in list(re.finditer(r'(Greetings|Gracious|グリーティング|ゲストルーム)',s))[:8]:
-              print('  …',re.sub(r'\s+',' ',re.sub(r'<[^>]+>',' ',s[max(0,m.start()-120):m.end()+160])))
-          for m in list(re.finditer(r'¥\s?[\d,]{3,7}',s))[:6]: print('  PRICE:',m.group(0))
-          PY
+          URL='https://script.google.com/macros/s/AKfycbwKplcDw6m0a3R5TNd1mLPsm8IrcX8hlMFQSTEHQE4QwcBalHRqC7AiuxGQ3lY_KiD4/exec'
+          SHOPS='milpoche|hariocorp|kinto\.co|snowpeak|iittala\.jp|lecreuset|imabari-kinsei|bodumshop'
+          for a in catalogue init; do
+            curl -sL -H 'Content-Type: text/plain' --data "{\"action\":\"$a\"}" "$URL" -o r.json
+            python3 -c "import json;d=json.load(open('r.json'));c=d.get('data',d).get('catalogue',d.get('data',{}));g=c.get('gifts',[]);print('$a ok:',d.get('ok'),'| gifts:',len(g),'| enabled:',sum(1 for x in g if x.get('enabled')))"
+            echo "$a has \"source\" field: $(grep -c '\"source\"' r.json)"
+            echo "$a has shop links: $(grep -Eoc "$SHOPS" r.json)"
           done
+          curl -sL -H 'Content-Type: text/plain' --data '{"action":"lookup","code":"E1FC7462A5DA4CBC9B42"}' "$URL" | python3 -c "import json,sys;d=json.load(sys.stdin);print('old code ok:',d.get('ok'),'reason:',d.get('reason'))"
+      - name: Website has no shop links
+        run: |
+          SITE='https://msburberryy-web.github.io/HtooAndMay_GiftToYou/'
+          curl -sL "$SITE" -o index.html
+          for js in $(grep -Eo 'assets/[^"]+\.js' index.html); do curl -sL "$SITE$js" >> all.js; done
+          echo "site JS bytes: $(wc -c < all.js)"
+          echo "site shop links: $(grep -Eoc 'milpoche|hariocorp|kinto\.co|snowpeak|iittala\.jp|lecreuset|imabari-kinsei|bodumshop' all.js)"
