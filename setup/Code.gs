@@ -271,6 +271,40 @@ function enableAllGifts(){
  if(over.length)console.log('⚠️ Over budget: '+over.join(', ')+'. Untick Enabled if you do not want them.');
 }
 function isSpecial_(v){return /^(special|prize)/i.test(text_(v));}
+// Nine gift sets (photos in product-photos/). ID, Brand (the short name guests see), Name (what's inside), Category,
+// Description, Details, Image, Source, Price, Enabled, Group. Price and Source are left for the organisers to fill in.
+const NEW_GIFT_SETS = [
+ ["walnut-pour-over-set", "Walnut Pour-Over Set", "Kettle, glass dripper, server & cup", "Coffee, Kitchen", "Slow mornings, beautifully brewed.", "Black gooseneck kettle, ribbed glass dripper on a walnut stand, glass server and a walnut-sleeve cup, with paper filters.", "walnut-pour-over-set", "", "", true, ""],
+ ["white-moka-pot-set", "White Moka Pot Set", "Moka pot, jar, scoop & brush", "Coffee, Kitchen", "Italian-style coffee at home.", "White stovetop moka pot with a wood-look handle, glass coffee jar with bamboo lid, coffee scoop, cleaning brush and a glass dish.", "white-moka-pot-set", "", "", true, ""],
+ ["blossom-dripper-set", "Blossom Dripper Set", "Pink & green ceramic dripper set", "Coffee, Relaxation", "A little colour for every cup.", "Pink-to-green ceramic origami dripper on a wooden stand, matching server with a walnut handle, and a cup.", "blossom-dripper-set", "", "", true, ""],
+ ["pink-dripper-starter-set", "Pink Dripper Starter Set", "Dripper, server, kettle & filters", "Coffee", "Everything to start pour-over coffee.", "Pink ceramic dripper, glass server, black gooseneck kettle and a pack of paper filters.", "pink-dripper-starter-set", "", "", true, ""],
+ ["moka-travel-kit", "Moka Travel Kit", "Moka pot & hand grinder in a case", "Coffee, Travel, Camping", "Fresh coffee wherever you go.", "Mongdio moka pot, hand coffee grinder and filter papers in a zip travel case.", "moka-travel-kit", "", "", true, ""],
+ ["kettle-glass-duo", "Kettle & Glass Duo", "White kettle & ribbed glass", "Coffee, The living", "Simple and lovely for two.", "White gooseneck kettle with a bamboo lid and a ribbed coffee glass with a wooden sleeve.", "kettle-glass-duo", "", "", true, ""],
+ ["aroma-stone-gift-set", "Aroma Stone Gift Set", "Aroma stone, candle & oil", "Relaxation, The living", "A calm, scented corner at home.", "Le Garden stone aroma diffuser with pink crystals, a scented candle and fragrance oil, in a gift box.", "aroma-stone-gift-set", "", "", true, ""],
+ ["mongdio-pour-over-box", "Pour-Over Gift Box", "Dripper, server, kettle & scoop", "Coffee, Kitchen", "A complete coffee set, ready to gift.", "Mongdio glass dripper and server, stainless gooseneck kettle, coffee scoop and filters in a gift box.", "mongdio-pour-over-box", "", "", true, ""],
+ ["aesop-fresh-start-kit", "Aesop Fresh Start Kit", "Soap, mouthwash & toothpaste", "Beauty, Travel", "Fresh and ready for every trip.", "Aesop Refresh Bar Soap 30g, Mouthwash 50mL and Toothpaste 10mL in a cotton drawstring bag.", "aesop-fresh-start-kit", "", "", true, ""]
+];
+// One click: adds the gift sets above to the Catalogue tab. Gifts already there (same ID) are left untouched,
+// so running it again changes nothing.
+function addNewGiftSets(){
+ const sh=giftBook_().getSheetByName(CATALOGUE_TAB);if(!sh)throw new Error('No Catalogue tab. Run setupGiftStandalone first.');
+ const headers=sh.getRange(1,1,1,Math.max(1,sh.getLastColumn())).getValues()[0].map(text_);
+ const cols=CATALOGUE_HEADERS.concat([CATALOGUE_GROUP_HEADER]).map(h=>headers.indexOf(h));
+ if(cols.slice(0,CATALOGUE_HEADERS.length).some(i=>i<0))throw new Error('The Catalogue tab needs its original column headers.');
+ const ids=new Set(sh.getLastRow()<2?[]:sh.getRange(2,cols[0]+1,sh.getLastRow()-1,1).getValues().map(r=>text_(r[0])));
+ const width=Math.max(headers.length,...cols.map(i=>i+1));
+ const fresh=NEW_GIFT_SETS.filter(g=>!ids.has(g[0])).map(g=>{const row=new Array(width).fill('');cols.forEach((c,i)=>{if(c>=0)row[c]=g[i];});return row;});
+ if(fresh.length){
+  const start=sh.getLastRow()+1;
+  if(start+fresh.length-1>sh.getMaxRows())sh.insertRowsAfter(sh.getMaxRows(),fresh.length);
+  sh.getRange(start,cols[0]+1,fresh.length,1).setNumberFormat('@');
+  sh.getRange(start,1,fresh.length,width).setValues(fresh);
+  sh.getRange(start,cols[9]+1,fresh.length,1).insertCheckboxes();
+  fresh.forEach((_,i)=>sh.getRange(start+i,cols[9]+1).setValue(true));
+  SpreadsheetApp.flush();refreshCatalogueNow();
+ }
+ console.log('Added '+fresh.length+' gift set(s) to the Catalogue'+(NEW_GIFT_SETS.length-fresh.length?' ('+(NEW_GIFT_SETS.length-fresh.length)+' were already there)':'')+'. Fill in Price (column I) and the buying link in Source (column H). Untick Enabled for any you do not want.');
+}
 function readSettings_(){
  const sh=giftBook_().getSheetByName(SETTINGS_TAB);
  const map={};

@@ -891,3 +891,21 @@ test('email login: guest list emails open the right card without the name step',
   s.ctx.refreshCatalogueNow();
   assert.equal(s.post({action: 'login', email: 'family@example.com'}).reason, 'ambiguous');
 });
+
+test('addNewGiftSets: adds the nine gift sets once, enabled, visible on the website', () => {
+  const s = setup();
+  const lines = []; s.ctx.console.log = m => lines.push(m);
+  s.ctx.addNewGiftSets();
+  s.ctx.addNewGiftSets();
+  const cat = s.book.sheets.Catalogue, h = cat.data[0];
+  const ids = cat.data.slice(1).map(r => r[h.indexOf('ID')]);
+  assert.equal(ids.filter(id => id === 'moka-travel-kit').length, 1, 'not added twice');
+  assert.match(lines[0], /Added 9 gift set/);
+  assert.match(lines[1], /Added 0 gift set.*9 were already there/);
+  const gifts = s.post({action: 'catalogue'}).data.gifts;
+  const kit = gifts.find(g => g.id === 'aesop-fresh-start-kit');
+  assert.equal(kit.enabled, true);
+  assert.equal(kit.brand, 'Aesop Fresh Start Kit');
+  assert.deepEqual(kit.categories, ['Beauty', 'Travel']);
+  assert.equal(kit.special, false);
+});
