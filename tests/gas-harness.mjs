@@ -91,7 +91,9 @@ export function setup(opts = {}) {
     ContentService: {MimeType: {JSON: 'json'}, createTextOutput: s => ({setMimeType() { return this; }, text: s})},
   };
   vm.createContext(ctx);
-  vm.runInContext(source.replace('const GIFT_ROWS_TO_ISSUE = [];', 'var GIFT_ROWS_TO_ISSUE = [2,3];'), ctx);
+  let code = source.replace('const GIFT_ROWS_TO_ISSUE = [];', 'var GIFT_ROWS_TO_ISSUE = [2,3];');
+  if (opts.emailLogin) code = code.replace('const GIFT_EMAIL_LOGIN = false;', 'const GIFT_EMAIL_LOGIN = true;');
+  vm.runInContext(code, ctx);
   ctx.setupGiftStandalone();
   ctx.issueGiftCodesForConfiguredRows();
   const book = books[GIFT_ID];

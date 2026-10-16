@@ -2,10 +2,10 @@ import {DEFAULT_GIFT_API_URL} from './endpoint';
 
 export const GIFT_API_URL: string = import.meta.env.VITE_GIFT_API_URL || DEFAULT_GIFT_API_URL;
 
-export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network' | 'name_required' | 'name_mismatch' | 'name_locked' | 'ambiguous';
+export type ApiReason = 'not_found' | 'invalid' | 'locked' | 'closed' | 'ended' | 'unavailable' | 'limit' | 'busy' | 'limited' | 'forbidden' | 'service' | 'network' | 'name_required' | 'name_mismatch' | 'name_locked' | 'ambiguous' | 'disabled';
 
 export class ApiError extends Error {
-  constructor(message: string, readonly status: number, readonly reason: ApiReason, readonly triesLeft?: number) {
+  constructor(message: string, readonly status: number, readonly reason: ApiReason, readonly triesLeft?: number, readonly hint?: string[]) {
     super(message);
   }
 }
@@ -52,14 +52,14 @@ async function callOnce<T>(action: string, payload: Record<string, unknown>): Pr
   } catch {
     throw new ApiError('Network error', 0, 'network');
   }
-  let body: {ok?: boolean; status?: number; reason?: ApiReason; error?: string; triesLeft?: number; data?: T} | null = null;
+  let body: {ok?: boolean; status?: number; reason?: ApiReason; error?: string; triesLeft?: number; hint?: string[]; data?: T} | null = null;
   try {
     body = await response.json();
   } catch {
     throw new ApiError(`Unexpected response (HTTP ${response.status})`, response.status, 'service');
   }
   if (!response.ok || !body || body.ok !== true) {
-    throw new ApiError(body?.error || 'Request failed', body?.status ?? response.status, body?.reason ?? 'service', body?.triesLeft);
+    throw new ApiError(body?.error || 'Request failed', body?.status ?? response.status, body?.reason ?? 'service', body?.triesLeft, Array.isArray(body?.hint) ? body.hint : undefined);
   }
   return body.data as T;
 }
@@ -83,7 +83,7 @@ export function imageFallback(e: {currentTarget: HTMLImageElement}) {
 }
 
 // The early-start request made by index.html before the app loads: the gift list and the guest's details in one trip.
-type BootData = {catalogue: unknown; lookup?: unknown; lookupError?: {status: number; reason: ApiReason; error: string}};
+type BootData = {catalogue: unknown; lookup?: unknown; lookupError?: {status: number; reason: ApiReason; error: string; hint?: string[]}};
 export function takeBoot(): {code: string; data: Promise<BootData>} | null {
   const w = window as unknown as {__giftBoot?: {code: string; promise: Promise<{ok?: boolean; data?: BootData}>}};
   const boot = w.__giftBoot;
