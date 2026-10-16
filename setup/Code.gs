@@ -74,6 +74,8 @@ const LOGIN_HEADERS = ['Time (Japan)','Code','Names on file','Typed name or emai
 // Email login: a guest may type the email they gave us instead of the code. Emails come from RSVPs › Gift email
 // and from the guest list tab below (column "Mail and Address"), where each guest is linked to their card by name
 // (the same names the name check accepts, incl. Accepted names). Signing in by email skips the name step.
+// Email sign-in is switched off for now: set to true to allow it again.
+const GIFT_EMAIL_LOGIN = false;
 const GUEST_LIST_TAB = 'Finalize Guest List';
 const GUEST_LIST_EMAIL_HEADER = 'Mail and Address';
 const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
@@ -153,7 +155,7 @@ function doPost(e){
   if(action==='init'){
    const out={catalogue:publicCatalogue_()};
    if(p.code&&codeChecksPaused_())out.lookupError={status:429,reason:'limited',error:'Too many codes were tried. Please wait a few minutes and try again.'};
-   else if(p.code){try{const code=normalizeCode_(p.code);registryEntry_(code);requirePass_(p,code);out.lookup=lookup_(code);}catch(error){if(!error.status)throw error;if(error.reason==='not_found')noteWrongCode_();out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};}}
+   else if(p.code){try{const code=normalizeCode_(p.code);registryEntry_(code);requirePass_(p,code);out.lookup=lookup_(code);}catch(error){if(!error.status)throw error;if(error.reason==='not_found')noteWrongCode_();out.lookupError={status:error.status,reason:error.reason||'service',error:error.message};if(error.hint)out.lookupError.hint=error.hint;}}
    return output_({ok:true,data:out});
   }
   if(action==='submit'||action==='track'||action==='save')requirePass_(p,normalizeCode_(p.code));
@@ -169,6 +171,7 @@ function doPost(e){
   else console.error('doPost '+(action||'?')+' failed: '+(error.stack||error));
   const out={ok:false,status:error.status||503,reason:error.reason||'service',error:error.status?error.message:'The sheet could not save this request. Please retry with the same code.'};
   if(error.triesLeft!=null)out.triesLeft=error.triesLeft;
+  if(error.hint)out.hint=error.hint;
   return output_(out);
  }finally{if(lock&&lock.hasLock())lock.releaseLock();}
 }
@@ -622,7 +625,25 @@ function passFor_(code){
  return Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature('pass:'+code,secret)).slice(0,22);
 }
 function requirePass_(p,code){
- if(typeof p.pass!=='string'||p.pass!==passFor_(code))throw fault_('Please confirm your name to continue.',401,'name_required');
+ if(typeof p.pass==='string'&&p.pass===passFor_(code))return;
+ const e=fault_('Please confirm your name to continue.',401,'name_required');
+ try{e.hint=nameHints_(registryEntry_(code));}catch(_){}
+ throw e;
+}
+// How each name on the card starts, to help the guest type the name they used on their RSVP: "Ay", "Ko"…
+// Leading titles (U, Daw, Ko…) are skipped when a longer name follows. A prize card without a winner gives none.
+function nameHints_(entry){
+ if(entry.prize&&!entry.winner)return [];
+ const out=[];
+ (entry.names||[]).forEach(n=>{
+  const first=String(n).split(/\s*(?:&|,|\/|\(|\bor\b)\s*/i)[0];
+  const words=first.normalize('NFKC').trim().split(/\s+/).filter(Boolean);
+  while(words.length>1&&NAME_TITLES.indexOf(words[0].toLowerCase())>=0&&words.slice(1).join('').length>=4)words.shift();
+  const w=words.join(' ');if(w.length<2)return;
+  const h=w.charAt(0).toUpperCase()+w.charAt(1).toLowerCase();
+  if(out.indexOf(h)<0)out.push(h);
+ });
+ return out.slice(0,2);
 }
 function verify_(p){
  const code=normalizeCode_(p.code);
@@ -671,6 +692,7 @@ function addGuestListEmails_(registry){
  }catch(error){console.warn('Guest list emails skipped: '+(error.message||error));}
 }
 function emailLogin_(p){
+ if(!GIFT_EMAIL_LOGIN)throw fault_('Email sign-in is not available. Please use the code on your card.',403,'disabled');
  if(codeChecksPaused_())throw fault_('Too many codes were tried. Please wait a few minutes and try again.',429,'limited');
  const email=String(p.email==null?'':p.email).normalize('NFKC').trim().toLowerCase();
  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||email.length>254)throw fault_('Please check your email address.',400,'invalid');

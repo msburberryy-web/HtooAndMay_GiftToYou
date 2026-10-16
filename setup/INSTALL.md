@@ -105,12 +105,16 @@ After the code, every guest types their name. The site opens only when it matche
 - **3 tries:** after 3 wrong names the card pauses for 30 minutes (`NAME_TRIES`, `NAME_LOCK_MINUTES`). Other cards are not affected.
 - **Login log tab** (Gift Manager): one row per attempt — time, code, names on file, what was typed, and the result. *No match* rows are red; *Prize winner saved* rows are yellow.
 - **Prize cards:** while **Winner** is empty, the first name typed is accepted and written into Prize codes › Winner. After that, only that name opens the card.
+- The name page asks for the name **in English, as written on the RSVP**, and hints how each name on the card starts (e.g. “Ay…” or “Ko…”, from RSVPs › Name and Guest name(s); titles like U/Daw/Ko are skipped).
 - Asked once per browser session: reloading keeps the guest in; a new session or another phone asks again.
 - The server enforces it: without passing the name check, the script does not show a guest's details or accept a request.
 
 After pasting this `Code.gs`, run `setupGiftStandalone` once to add the **Accepted names** column, then deploy with **Edit › New version**.
 
-## 8. Sign in with email
+## 8. Sign in with email (switched off for now)
+
+Email sign-in is off: `GIFT_EMAIL_LOGIN = false` in `Code.gs` and `EMAIL_LOGIN=false` in `app/components/Catalogue.tsx`. Set both to `true` to bring it back.
+
 
 Guests can type the **email they replied with** instead of the code (one box takes either). The printed label shows part of that email, e.g. `ay****e@gmail.com`, as a reminder.
 

@@ -787,7 +787,9 @@ test('name check: code alone is not enough; the right name opens the page and is
   const code = s.codeOf(2); // Aye Aye & Ko Ko
   const noPass = s.post({action: 'lookup', code, pass: null});
   assert.equal(noPass.reason, 'name_required');
+  assert.deepEqual(noPass.hint, ['Ay', 'Ko'], 'how each name starts');
   assert.equal(s.post({action: 'init', code, pass: null}).data.lookupError.reason, 'name_required');
+  assert.deepEqual(s.post({action: 'init', code, pass: null}).data.lookupError.hint, ['Ay', 'Ko']);
   assert.equal(s.post({action: 'save', code, saved: [], pass: null}).reason, 'name_required');
   assert.equal(s.post({action: 'submit', code, consent: true, data: delivery, pass: 'forged'}).reason, 'name_required');
   // Unknown codes still say "not found" (no name step for a code that does not exist).
@@ -853,7 +855,8 @@ test('name check: a prize card saves the first name typed as the Winner', () => 
 });
 
 test('email login: guest list emails open the right card without the name step', () => {
-  const s = setup();
+  assert.equal(setup().post({action: 'login', email: 'koko.mail@example.com'}).reason, 'disabled', 'switched off by default');
+  const s = setup({emailLogin: true});
   const rsvpBook = Object.values(s.books).find(b => b.getSheetByName('RSVPs'));
   const sheet = rsvpBook.insertSheet('Finalize Guest List');
   sheet.data = [
